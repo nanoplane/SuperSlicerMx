@@ -1188,6 +1188,27 @@ void PrintConfigDef::init_fff_params()
     def->is_vector_extruder = true;
     def->set_default_value(new ConfigOptionStrings{ "" });
 
+    // **mtr** add mix ratio
+                   
+    def = this->add("extruder_mix_ratio", coStrings);
+    def->label = L("Extruder Mix Ratio");
+    def->gui_type = "one_string";
+    def->full_width = true;
+    def->tooltip = L("This is used to specify a mix ratio for mixing extruders. "
+                     " If your extruder doesn't support mixing this is ignored");
+    // Empty string means no mix ratio defined.
+    def->set_default_value(new ConfigOptionStrings {"0.25:0.25:0.25:0.25"});
+
+    def = this->add("extruder_mix_ratio", coStrings);
+    def->label = L("Extruder Mix Ratio");
+    def->gui_type = "one_string";
+    def->full_width = true;
+    def->tooltip = L("This is used to specify a mix ratio for mixing extruders. "
+                     " If your extruder doesn't support mixing this is ignored");
+    // Empty string means no mix ratio defined.
+    def->set_default_value(new ConfigOptionStrings {"0.25:0.25:0.25:0.25"});
+
+
     def = this->add("extruder_offset", coPoints);
     def->label = L("Extruder offset");
     def->category = OptionCategory::extruders;
@@ -2783,6 +2804,7 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloats{ 1500., 1250. });
 
+
     def = this->add("max_gcode_per_second", coFloat);
     def->label = L("Maximum G1 per second");
     def->category = OptionCategory::speed;
@@ -2794,6 +2816,29 @@ void PrintConfigDef::init_fff_params()
     def->min = 0;
     def->mode = comExpert;
     def->set_default_value(new ConfigOptionFloat(1500));
+
+    def = this->add("manage_tool_lifecycle", coBools);
+    def->label = L("Manage tool lifecycle");
+    def->tooltip = L("manage creation and deletion of associated extruder/tool on the printer");
+    def->mode = comExpert;
+    def->set_default_value(new ConfigOptionBools { false });
+
+    def = this->add("tool_create_gcode", coStrings);
+    def->label = L("Tool Creation gcode");
+    def->gui_type = "one_string";
+    def->full_width = true;
+    def->tooltip = L("If Manage_Tool_lifecycle is set, this gcode is included at the beginning of the gcode to dynamically create the associated tool for this virtual extruder. Replace the 'x' with the associated tool number");
+    // Empty string means no mix ratio defined.
+    def->set_default_value(new ConfigOptionStrings {" M563 Px D0:1:2:3 H1 F1 "});
+
+    def = this->add("tool_release_gcode", coStrings);
+    def->label = L("Tool Release gcode");
+    def->gui_type = "one_string";
+    def->full_width = true;
+    def->tooltip = L("If Manage_Tool_lifecycle is set, this gcode is included at the end of the gcode to dynamically release the associated tool for this virtual extruder. Replace the 'x' with the associated tool number");
+    // Empty string means no mix ratio defined.
+    def->set_default_value(new ConfigOptionStrings {"M563 Px D-1 H-1"});
+    //(added mixing hot end support)
 
     def = this->add("max_fan_speed", coInts);
     def->label = L("Max");
@@ -2965,6 +3010,16 @@ void PrintConfigDef::init_fff_params()
     def->min = 0;
     def->mode = comExpert;
     def->set_default_value(new ConfigOptionFloat(0));
+                           
+   def = this->add("mix_filaments_count", coInts);
+   def->label = L("Filaments in Mix");
+   def->tooltip = L("Number of filaments feeding the mixing hot-end");
+   def->mode = comExpert;
+   def->min = 2;
+   def->max = 8;
+   def->set_default_value(new ConfigOptionInts {4});
+
+
 
     def = this->add("notes", coString);
     def->label = L("Configuration notes");
@@ -3990,6 +4045,13 @@ void PrintConfigDef::init_fff_params()
     def->tooltip = L("The printer multiplexes filaments into a single hot end.");
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionBool(false));
+    
+   def = this->add("single_extruder_mixer", coBools);
+   def->label = L("Single Extruder Mixer");
+   def->tooltip = L("The extruder Mixes filaments proportionally into a single hot end.");
+   def->mode = comExpert;
+   def->set_default_value(new ConfigOptionBools { false });
+
 
     def = this->add("single_extruder_multi_material_priming", coBool);
     def->label = L("Prime all printing extruders");
@@ -4906,8 +4968,22 @@ void PrintConfigDef::init_extruder_option_keys()
         "tool_name",
         "wipe",
 		"wipe_extra_perimeter",
+<<<<<<< HEAD
         "wipe_only_crossing",
         "wipe_speed",
+=======
+        "retract_layer_change",
+        "retract_length_toolchange",
+        "retract_restart_extra_toolchange",
+        "extruder_colour",
+        "single_extruder_mixer",
+        "manage_tool_lifecycle",
+        "tool_create_gcode",
+        "tool_release_gcode",
+        "mix_filaments_count",
+        "extruder_mix_ratio",
+        "default_filament_profile"
+>>>>>>> 88a8367cb (added mixing hot end support)
     };
 
     m_extruder_retract_keys = {
