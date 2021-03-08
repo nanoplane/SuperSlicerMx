@@ -194,6 +194,8 @@ enum ConfigOptionType : uint16_t{
     coBools         = coBool + coVectorType,
     // a generic enum
     coEnum          = 9,
+    // vector of enum
+    coEnums         = coEnum + coVectorType
 };
 
 enum ConfigOptionMode {
