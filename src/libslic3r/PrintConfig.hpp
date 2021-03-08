@@ -165,6 +165,12 @@ enum ZLiftTop {
     zltNotTop
 };
 
+//enum MixLevelType {
+//    mltPct,
+//    mltHeight,
+//    mltLayer
+//};
+
 template<> inline const t_config_enum_values& ConfigOptionEnum<CompleteObjectSort>::get_enum_values() {
     static t_config_enum_values keys_map = {
         {"object", cosObject},
@@ -403,6 +409,7 @@ template<> inline const t_config_enum_values& ConfigOptionEnum<ForwardCompatibil
 
     return keys_map;
 }
+
 // Defines each and every confiuration option of Slic3r, including the properties of the GUI dialogs.
 // Does not store the actual values, but defines default values.
 class PrintConfigDef : public ConfigDef
@@ -1162,6 +1169,7 @@ public:
     ConfigOptionStrings             extruder_mix_ratios;
     ConfigOptionStrings             extruder_mix_change_points;
     ConfigOptionBools               extruder_gradient;
+//    ConfigOptionEnum<MixLevelType>  extruder_mix_level_type;
     ConfigOptionBool                single_extruder_multi_material_priming;
     ConfigOptionBool                wipe_tower_no_sparse_layers;
     ConfigOptionStrings             tool_name;
@@ -1285,6 +1293,7 @@ protected:
         OPT_PTR(extruder_mix_ratios);
         OPT_PTR(extruder_gradient);
         OPT_PTR(extruder_mix_change_points);
+//        OPT_PTR(extruder_mix_level_type);
         OPT_PTR(single_extruder_multi_material_priming);
         OPT_PTR(wipe_tower_no_sparse_layers);
         OPT_PTR(start_gcode);
