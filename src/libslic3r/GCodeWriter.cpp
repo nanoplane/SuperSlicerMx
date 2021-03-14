@@ -166,17 +166,17 @@ std::string GCodeWriter::postamble() const
 
 std::string GCodeWriter::set_temperature(const int16_t temperature, bool wait, int tool)
 {
+    int m_tool_id = m_tool != nullptr ? m_tool->id() : -1;
     //use m_tool if tool isn't set
-    if (tool < 0 && m_tool != nullptr)
-        tool = m_tool->id();
+    if (tool < 0 && m_tool_id > 0)
+        tool = m_tool_id;
 
     //add offset
     int16_t temp_w_offset = temperature;
     temp_w_offset += int16_t(get_tool(tool)->temp_offset());
     temp_w_offset = std::max(int16_t(0), std::min(int16_t(2000), temp_w_offset));
 
-    // temp_w_offset has an effective minimum value of 0, so this cast is safe.
-    if (m_last_temperature_with_offset == temp_w_offset && !wait)
+    if (m_last_temperature_with_offset == temp_w_offset && !wait && tool == m_tool_id)
         return "";
     if (wait && (FLAVOR_IS(gcfMakerWare) || FLAVOR_IS(gcfSailfish)))
         return "";
@@ -211,7 +211,7 @@ std::string GCodeWriter::set_temperature(const int16_t temperature, bool wait, i
     gcode << " ; " << comment << "\n";
     
     if ((FLAVOR_IS(gcfTeacup) || FLAVOR_IS(gcfRepRap)) && wait)
-        gcode << "M116 ; wait for temperature to be reached\n\n";
+        gcode << "M116 ; wait for temperature to be reached\n";
     
     m_last_temperature = temperature;
     m_last_temperature_with_offset = temp_w_offset;
