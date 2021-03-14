@@ -1,43 +1,32 @@
 
 [![you can get this shield at shields.io](https://img.shields.io/discord/771316156203270154?color=7289da&logo=discord&logoColor=white)](https://discord.gg/ygBBdRRwJY)
 
-# SuperSlicer
+# MxSuperSlicer
 
-**A PrusaSlicer fork (which is a slic3r fork)** (previously Slic3r++)
+**A SuperSlicer fork which is a PrusaSlicer fork (which is a slic3r fork)** (previously Slic3r++)
 
-Prebuilt Windows, Linux and macOS 64-bit releases are available through the [git releases page](https://github.com/supermerill/SuperSlicer/releases). The Linux & macOS builds aren't tested (by me), just compiled, so please report any bugs that may occur during use.
-Nightly builds are available through the [git actions page](https://github.com/supermerill/SuperSlicer/actions). Click on the build for your platform and then on 'Artifacts (1)' in the top right corner.
+Prebuilt Windows, Linux and macOS 64-bit releases are available through the [git releases page](https://github.com/nanoplane/SuperSlicerMx/releases). The Linux & macOS builds aren't tested (by me), just compiled, so please report any bugs that may occur during use.
+Nightly builds are available through the [git actions page](https://github.com/nanoplane/SuperSlicerMx/actions). Click on the build for your platform and then on 'Artifacts (1)' in the top right corner.
 
-SuperSlicer takes 3D models (STL, OBJ, AMF) and converts them into G-code
+SuperSlicerMx takes 3D models (STL, OBJ, AMF) and converts them into G-code
 instructions for FFF printers or PNG layers for mSLA 3D printers. It's compatible with any modern printer based on the RepRap toolchain which is running a firmware based on Marlin, Prusa, Klipper, etc.
 
-SuperSlicer is based on [PrusaSlicer](https://github.com/prusa3d/PrusaSlicer) by Prusa Research.
+SuperSlicerMx is based on SuperSlicer [SuperSlicer](https://github.com/supermerril/SuperSlicer)
+SuperSlicer is based on PrusaSlicer [PrusaSlicer](https://github.com/prusa3d/PrusaSlicer) by Prusa Research.
 PrusaSlicer is based on [Slic3r](https://github.com/Slic3r/Slic3r) by Alessandro Ranellucci and the RepRap community.
 
 See the [wiki](https://github.com/supermerill/SuperSlicer/wiki) and
 the [documentation directory](doc/) for information about compilation.
 
-### What are SuperSlicer main features? main new features/differences?
-
-* Custom-made generated calibration tests.
-* **Ironing** top surface & many new settings to fine-tune the top surface quality, like 'only one perimeter on top'.
-* A "denser infill" option for supporting the (solid) top layers.
-* Better **Thin walls** (anchored inside the print, no more random bits at the ends, embedded in perimeter loops).
-* Options to change holes dimensions and/or geometry, to print them at the right size.
-* Better overhangs (add perimeters if needed, slice them in opposite direction each layer).
-* Brim rework: many more options (inside, outside only, 'ears', per object)
-* Some new seam options, to help hide them.
-* Built-in calibration prints
-* Built-in object generation script
-* Can join perimeters into a big one to avoid travel moves.
-* Many other little options and corrections (like the filled concentric pattern).
-* It has also all the current slic3rPE/PrusaSlicer features.
-
-### Complete changelog [here](https://github.com/supermerill/SuperSlicer/wiki)
+### What are SuperSlicerMx main features? main new features/differences?
+* Support for Mixing hotEnds on printers using reprap firmware.
+* Updates to better handle Hot End heat management for mixing hotends and virtual extruder "tools"
+* 
+### Complete changelog [here](https://github.com/nanoplane/SuperSlicerMx/wiki)
 
 See the wiki for examples.
 
-### What are SuperSlicer / PrusaSlicer / Slic3r's main features?
+### What are SuperSlicerMx / SuperSlicer / PrusaSlicer / Slic3r's main features?
 
 Key features are:
 
@@ -95,6 +84,9 @@ Before sending patches and pull requests contact me (preferably through opening 
 changes. This way we can ensure that nobody wastes their time and no conflicts arise in development.
 
 ## License and attribution
+
+SuperSlicerMx is licensed under the _GNU Affero General Public License, version 3_.
+SuperSlicerMx is based on PrusaSlicer by PrusaResearch.
 
 SuperSlicer is licensed under the _GNU Affero General Public License, version 3_.
 SuperSlicer is based on PrusaSlicer by PrusaResearch.
