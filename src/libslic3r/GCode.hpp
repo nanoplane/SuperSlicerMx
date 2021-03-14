@@ -502,6 +502,7 @@ private:
 
     friend class Wipe;
     friend class WipeTowerIntegration;
+    friend class ExtruderMixer;
 };
 
 std::vector<const PrintInstance*> sort_object_instances_by_model_order(const Print& print);

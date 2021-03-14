@@ -1095,10 +1095,6 @@ std::vector<const PrintInstance*> sort_object_instances_by_model_order(const Pri
     return instances;
 }
 
-ExtruderMixAndChangePts::ExtruderMixAndChangePts(ConfigOptionString ratio, ConfigOptionString change_point, bool gradient, float min_height, float max_height)
-{
-    
-}
 
 //std::vector<float> get_layer_mix_ratio(float height)
 //{
