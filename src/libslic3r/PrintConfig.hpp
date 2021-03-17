@@ -1164,7 +1164,6 @@ public:
     ConfigOptionBools               single_extruder_mixer;
     ConfigOptionBools               manage_tool_lifecycle;
     ConfigOptionStrings             tool_create_gcode;
-    ConfigOptionStrings             tool_release_gcode;
     ConfigOptionInts                mix_filaments_count;
     ConfigOptionStrings             extruder_mix_ratios;
     ConfigOptionStrings             extruder_mix_change_points;
@@ -1288,7 +1287,6 @@ protected:
         OPT_PTR(single_extruder_mixer);
         OPT_PTR(manage_tool_lifecycle);
         OPT_PTR(tool_create_gcode);
-        OPT_PTR(tool_release_gcode);
         OPT_PTR(mix_filaments_count);
         OPT_PTR(extruder_mix_ratios);
         OPT_PTR(extruder_gradient);

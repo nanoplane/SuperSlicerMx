@@ -444,6 +444,65 @@ std::string GCodeWriter::toolchange(uint16_t tool_id)
     return gcode.str();
 }
 
+// for mixing extruders, create's a virtual tool
+std::string GCodeWriter::create_virtual_tool(int tool_id, std::string drives, std::string name)
+{
+    std::ostringstream gcode;
+    if (FLAVOR_IS(gcfRepRap))
+        gcode << "M563 P" << tool_id << " D" << drives << " S" << name
+        << " ; create virtual tool\n";
+    else
+        gcode << "; create Marlin virtual tool - NOT!\n";
+    
+    return gcode.str();
+}
+
+// for mixing extruders, releaes a virtual tool
+std::string GCodeWriter::release_virtual_tool(int tool_id)
+{
+    std::ostringstream gcode;
+    if (FLAVOR_IS(gcfRepRap)) {
+        gcode << "M563 P" << tool_id << " D-1 H-1 ; Let the tool go";
+    }
+    
+    return gcode.str();
+}
+
+// for mixing extruders, sets the mixture ratio based on the vector of values.
+// limits decimals.
+std::string GCodeWriter::set_tool_mix(int tool_id, std::vector<double> ratios)
+{
+    std::ostringstream gcode;
+    if (FLAVOR_IS(gcfRepRap)) {
+        gcode << "M567" << tool_id << " E";
+        for (double val : ratios) {
+            gcode << ":" << XYZF_NUM(val);
+        }
+    }
+    else if (FLAVOR_IS(gcfMarlin)) {
+        int i=0;
+        for (double val : ratios) {
+            gcode << "M163 S" << i << " P" << XYZF_NUM(val) << "\n";
+            i++;
+        }
+        gcode << "M164 S" << tool_id << " ";
+    }
+    gcode << " ; set mix ratio\n";
+    
+    return gcode.str();
+}
+
+// for managed tools, sets firmware retraction
+std::string GCodeWriter::set_tool_fimrware_retraction(int tool_id, double length, double speed, double lift)
+{
+    std::ostringstream gcode;
+    if (FLAVOR_IS(gcfRepRap))
+        gcode << "M207 P" << tool_id << " S" << XYZF_NUM(length) << " F" << speed
+        << "Z " << lift;
+    gcode << "; set firmware retraction \n";
+    return gcode.str();
+}
+
 std::string GCodeWriter::set_speed(double F, const std::string &comment, const std::string &cooling_marker) const
 {
     assert(F > 0.);
