@@ -109,11 +109,13 @@ public:
         return (*this);
     }
 
+    // **mtr doesn't work for reprap where you create virtual tools.
     WipeTowerWriter&            disable_linear_advance() {
-        if (m_gcode_flavor == gcfRepRap || m_gcode_flavor == gcfSprinter)
+        if (/*m_gcode_flavor == gcfRepRap || */ m_gcode_flavor == gcfSprinter)
             m_gcode += (std::string("M572 D") + std::to_string(m_current_tool) + " S0\n");
          else if(m_gcode_flavor == gcfKlipper)
              m_gcode += std::string("SET_PRESSURE_ADVANCE ADVANCE=0\n");
+         else if(m_gcode_flavor == gcfRepRap) ; // **mtr just do nothing for now..
          else
             m_gcode += std::string("M900 K0\n");
         return *this;

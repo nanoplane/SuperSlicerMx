@@ -124,27 +124,27 @@ public:
 class ExtruderMixAndChangePts
 {
     // min and max height are the first layer height and the top layer height of the objects being printed.
-    ExtruderMixAndChangePts(ConfigOptionString ratio, ConfigOptionString change_point,
-                            bool gradient, bool absolute, float min_height, float max_height);
-    std::vector<float> get_layer_mix_ratio(float height);
-private:
+public:
+    ExtruderMixAndChangePts(int num_filaments, std::string ratio, std::string change_point,
+                            bool gradient, bool absolute, double min_height, double max_height);
     
+    std::vector<double> get_layer_mix_ratio(double height);
+private:
+    bool m_gradient;
+    bool m_absolute;
     // vector of height to mix ratio values
-    std::vector<std::pair<std::vector<float>, float>>  m_mix_ratios;
+    std::vector<std::pair<double, std::vector<double>>>  m_mix_ratio_map;
 };
 
 // tracks and supports adjusting the mix ratios for all active extruders.
-class ExtruderMixer
+class MixingExtruderLayers
 {
-    void init_mixing_extruders(FILE* file, Print& print, GCodeWriter& writer, ToolOrdering& tool_ordering, const std::string& custom_gcode);
-    std::string layer_mix_change(GCode gcodegen);
+public:
+    std::string init_mixing_extruders( GCode &gcodegen, Print& print, ToolOrdering& tool_ordering);
+    std::vector<double> layer_mix_change(double z, bool &needs_change);
 private:
-    struct ExtChangePts {
-        int m_extruder_id;
-        std::vector<ExtruderMixAndChangePts> m_mix_change_pts;
-    };
-    
-    std::vector<ExtChangePts> m_mix_refs;
+    // a map containing mix and change point records per extruder.
+    std::map<int, ExtruderMixAndChangePts *> m_mix_refs;
 };
 
 class GCode : ExtrusionVisitorConst  {
@@ -175,7 +175,7 @@ public:
         m_silent_time_estimator_enabled(false),
         m_last_obj_copy(nullptr, Point(std::numeric_limits<coord_t>::max(), std::numeric_limits<coord_t>::max())),
         m_last_too_small(ExtrusionRole::erNone)
-        {}
+    {}
     ~GCode() {}
 
     // throws std::runtime_exception on error,
@@ -230,7 +230,6 @@ private:
 
     void            _init_multiextruders(FILE* file, Print& print, GCodeWriter& writer, ToolOrdering& tool_ordering, const std::string& custom_gcode);
     
-    void            _init_mixing_extruders(FILE* file, Print& print, GCodeWriter& writer, ToolOrdering& tool_ordering, const std::string& custom_gcode);
 
 
     static std::vector<LayerToPrint>        		                   collect_layers_to_print(const PrintObject &object);
@@ -351,6 +350,9 @@ private:
     std::string     retract(bool toolchange = false);
     std::string     unretract() { return m_writer.unlift() + m_writer.unretract(); }
     std::string     set_extruder(unsigned int extruder_id, double print_z, bool no_toolchange = false);
+    
+    // for mixing hot-end support with gradients and layers.
+    MixingExtruderLayers        m_mixer_layers;
 
     // Cache for custom seam enforcers/blockers for each layer.
     SeamPlacer                          m_seam_placer;
