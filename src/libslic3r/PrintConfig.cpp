@@ -4999,7 +4999,6 @@ void PrintConfigDef::init_extruder_option_keys()
         "single_extruder_mixer",
         "manage_tool_lifecycle",
         "tool_create_gcode",
-        "tool_release_gcode",
         "mix_filaments_count",
         "extruder_mix_ratios",
         "extruder_gradient",

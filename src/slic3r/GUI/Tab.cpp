@@ -2986,30 +2986,32 @@ void TabPrinter::toggle_options()
         
         bool single_extruder_mix = m_config->opt_bool("single_extruder_mixer", i);
         std::vector<std::string> vec_se = { "extruder_mix_ratios", "mix_filaments_count",
-            "extruder_gradient"};
+            "extruder_gradient", "extruder_mix_change_points", "extruder_mix_absolute"};
         for (auto el : vec_se) {
             field = get_field(el, i);
             if (field)
                 field->toggle(single_extruder_mix);
         }
-
+        // enable manage lifecycle stuff only for reprap
+        bool flavor_reprap = m_last_gcode_flavor == gcfRepRap;
+        
         bool have_retract_length = m_config->opt_float("retract_length", i) > 0;
         bool manage_lifecycle = m_config->opt_bool("manage_tool_lifecycle", i);
         
-        std::vector<std::string> vec_ml = { "tool_create_gcode", "tool_release_gcode" };
-        for (auto el : vec_ml) {
-            field = get_field(el, i);
-            if (field)
-                field->toggle(manage_lifecycle);
-        }
+        field = get_field("manage_tool_lifecycle", i);
+        if (field)
+            field->toggle(flavor_reprap);
+        field = get_field("tool_create_gcode", i);
+        if (field)
+            field->toggle(flavor_reprap && manage_lifecycle);
 
-        
         // when using firmware retraction, firmware decides retraction length... except if we're managine the lifecycle.
         bool use_firmware_retraction = m_config->opt_bool("use_firmware_retraction");
         field = get_field("retract_length", i);
         if (field)
-            field->toggle(!use_firmware_retraction || manage_lifecycle);
-
+            field->toggle(!use_firmware_retraction || (manage_lifecycle && flavor_reprap));
+        
+        
         // user can customize travel length if we have retraction length or we"re using
         // firmware retraction
         field = get_field("retract_before_travel", i);

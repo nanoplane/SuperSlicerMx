@@ -1095,13 +1095,82 @@ std::vector<const PrintInstance*> sort_object_instances_by_model_order(const Pri
     return instances;
 }
 
+// implementations for Mixing Extruder clases
 
-//std::vector<float> get_layer_mix_ratio(float height)
-//{
-//    for (std::pair<int, std::vector<ExtruderMixandChangePts>> mix, m_mix_ratios) {
-//        
-//    }
-//}
+/*
+ * so the trick here is to parse the ratio arrays, convert to min_height - max_height range
+ * then parse change point array and create the mapping as vector of height to vector of mix ratio pairs
+ *
+ */
+ExtruderMixAndChangePts::ExtruderMixAndChangePts(int num_filaments, std::string ratios, std::string change_points,bool gradient, bool absolute, double min_height, double max_height)
+{
+    m_gradient = gradient;
+    m_absolute = absolute;
+    
+    const char *ptr = ratios.data();
+    
+    std::vector<double> mheights;
+    std::vector<std::vector<double>> mratios;
+    std::vector<double> val;
+    int fil = 0;
+    double total=0.0;
+    
+    // parse and normalize the ratios
+    while (*ptr != 0) {
+        char *endptr = nullptr;
+        double ratio = strtod(ptr, &endptr);
+        if (ptr != endptr) {
+            val.push_back(ratio);
+            total += ratio;
+            ++fil;
+        }
+        ptr = endptr;
+        // skip whitespace
+        for (; *ptr == ' ' || *ptr == '\t'; ++ ptr);
+
+        if (fil > 0 && ((strchr("\r\n\0", *ptr) != nullptr)|| fil >= num_filaments)) {
+            if (fil < num_filaments) {
+                // not enought entries, make them up
+                for (int i =1; i< num_filaments; i++) {
+                    val.push_back(0.0);
+                }
+            }
+            // Now adjust the values to be within the range of 0 to 1.0
+            for (int i=0; i < val.size(); i++) {
+                val[i] = val[i]/total;
+            }
+            mratios.push_back(val);
+            total = 0.0;
+            fil = 0;
+            val.clear();
+            // skip the rest of the line
+            for(;strchr("\n\r\0",*ptr) == nullptr; ptr++) ;
+            // if we're done, leave now.
+            if (*ptr == '\0')
+                break;
+        } else
+            ptr++;
+        //skip any empty space and lines
+        for(;*ptr != '\0' && strchr(" \n\r\t", *ptr) != nullptr; ptr++) {
+            int a=0;
+        };
+        //ok, now transform the Height values
+        
+    }
+    
+    if (m_absolute) {
+        
+    }
+        
+}
+
+std::vector<double> ExtruderMixAndChangePts:: get_layer_mix_ratio(double height)
+{
+    std::vector<double> result {0.25,0.25,0.25,0.25};
+    
+    return result;
+}
+
 
 // forward declaration so I don't move code too much **mtr**
 static bool custom_gcode_sets_temperature(const std::string &gcode, const int mcode_set_temp_dont_wait, const int mcode_set_temp_and_wait, const bool include_g10, int &temp_out, int tool_id);
@@ -1109,18 +1178,28 @@ static bool custom_gcode_sets_temperature(const std::string &gcode, const int mc
 // forward declaration so I don't move code too much **mtr**
 static bool custom_gcode_sets_bed_temperature(const std::string &gcode, const int mcode_set_temp_dont_wait, const int mcode_set_temp_and_wait, int &temp_out);
 
+
+
+
 // initialize and create virtual mixing extruders.  this needs to be done at the beginning before any tools are used
 // even before any custom G-Code is run.  note, currently only works for reprap GCode flavor
-void GCode::_init_mixing_extruders(FILE* file, Print& print, GCodeWriter& writer, ToolOrdering& tool_ordering, const std::string& custom_gcode)
+std::string MixingExtruderLayers::init_mixing_extruders(GCode &gcodegen, Print& print, ToolOrdering& tool_ordering)
 {
+    std::ostringstream gcode;
+    
     if (std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) {
+        
+        // first collect and translate the mix ratios, filling up the m_mix_refs vector... maybe make it a map.
+        // iterate through the extruders, generate the ExtruderMixAnChangePts objects adding them to
+        //the m_mix_refs map.
+        
+        
         for (uint16_t tool_id : tool_ordering.all_extruders()) {
             // If we're managing tool creation, we need to create them first
             if (bool(print.config().manage_tool_lifecycle.get_at(tool_id))) {
                 std::string gen_tool_code = std::string(print.config().tool_create_gcode.get_at(tool_id));
                 std::string tool_name = std::string(print.config().tool_name.get_at(tool_id));
-                _write_format(file, "M563 P%d %s S\"%s\"; Create the virtual tool\n",
-                    tool_id, gen_tool_code.c_str(), tool_name.c_str());
+                gcode << gcodegen.writer().create_virtual_tool(tool_id, gen_tool_code.c_str(), tool_name.c_str());
                 // if firmware extraction is set, we need to set that up..
                 if (bool(print.config().use_firmware_retraction)) {
                     double length = print.config().retract_length.get_at(tool_id);
@@ -1128,27 +1207,43 @@ void GCode::_init_mixing_extruders(FILE* file, Print& print, GCodeWriter& writer
                     double lift = print.config().retract_lift.get_at(tool_id);
                     double speed = print.config().retract_speed.get_at(tool_id)*60; //mm/minute
                     length /= num_mix_filaments;
-                    _write_format(file, "M207 P%d S%.2f F%.0f Z%.2f  ; Set firmware retraction\n",
-                        tool_id, length, speed, lift);
+                    gcode << gcodegen.writer().set_tool_fimrware_retraction(tool_id, length, speed, lift);
 
                 }
             }
             // and if it's a mixing extruder, we need to set the mix ratio.
             if (bool(print.config().single_extruder_mixer.get_at(tool_id))) {
                 std::string mix_ratios = std::string(print.config().extruder_mix_ratios.get_at(tool_id));
-                // get the last ratio in the list since it will be the bottom ratio
-                std::stringstream mix_stream(mix_ratios);
-                std::string this_ratio;
-                std::string last_ratio;
-                while (getline(mix_stream, this_ratio)) {
-                    last_ratio = this_ratio;
+                std::string change_points = std::string(print.config().extruder_mix_change_points.get_at(tool_id));
+                bool gradient = print.config().extruder_gradient.get_at(tool_id);
+                bool absolute = print.config().extruder_mix_absolute.get_at(tool_id);
+                int num_filaments = print.config().mix_filaments_count.get_at(tool_id);
+                double min_height = 0; // need to figure out what the "real" minimum height of the object is...
+                double max_height = 0;
+                // get the min and max heights for the assoicated objects..
+                PrintObjectPtrs objects = print.objects();
+                for (PrintObject * po : objects) {
+                    std::vector<uint16_t> extruders = po->object_extruders();
+                    for (int i : extruders) {
+                        if (i == tool_id){
+                            max_height = MAX(max_height, po->height());
+                        }
+                    }
                 }
-                _write_format(file, "M567 P%d E%s  ; Set the initial mix ratio\n\n",
-                              tool_id, last_ratio.c_str());
+                // now create and add this to the mix_refs
+                ExtruderMixAndChangePts * m_and_cp =
+                new ExtruderMixAndChangePts(num_filaments, mix_ratios,change_points, gradient, absolute, min_height, max_height);
+                m_mix_refs.insert({tool_id, m_and_cp});
+                // output the initial mix for this tool.
+                gcode << gcodegen.writer().set_tool_mix(tool_id,
+                                                        m_and_cp->get_layer_mix_ratio(min_height));
             }
         }
     }
+    return gcode.str();
 }
+
+
 
 // set standby temp for extruders
 // Parse the custom G-code, try to find T, and add it if not present
@@ -1473,8 +1568,10 @@ void GCode::_do_export(Print& print, FILE* file, ThumbnailsGeneratorCallback thu
     if((initial_extruder_id != (uint16_t)-1) && !this->config().start_gcode_manual && this->config().gcode_flavor != gcfKlipper && print.config().first_layer_bed_temperature.get_at(initial_extruder_id) != 0)
         this->_print_first_layer_bed_temperature(file, print, start_gcode, initial_extruder_id, false);
 
-    // init (virtual) mixing extruders.  Also sets initial mix rations for all mixing extruders. need to do this before setting temps or extruding.
-    this->_init_mixing_extruders(file, print, m_writer, tool_ordering, start_gcode);
+    // init (virtual) mixing extruders.  Also sets initial mix rations for all mixing extruders.
+    //need to do this before setting temps or extruding.
+    // returns gcode for virtual tool creation and initial configuration
+    _write(file, this->m_mixer_layers.init_mixing_extruders(*this, print, tool_ordering));
 
     //init extruders
     if (!this->config().start_gcode_manual)
@@ -1484,6 +1581,16 @@ void GCode::_do_export(Print& print, FILE* file, ThumbnailsGeneratorCallback thu
     if ((initial_extruder_id != (uint16_t)-1) && !this->config().start_gcode_manual && (this->config().gcode_flavor != gcfKlipper || print.config().start_gcode.value.empty()) && print.config().first_layer_temperature.get_at(initial_extruder_id) != 0)
         this->_print_first_layer_extruder_temperatures(file, print, start_gcode, initial_extruder_id, false);
 
+    // Set extruder(s) temperature before and after start G-code. but only if the custom gcode doesn't
+    if ((this->config().gcode_flavor != gcfKlipper || print.config().start_gcode.value.empty()) && print.config().first_layer_temperature.get_at(initial_extruder_id) != 0) {
+        int temp_by_gcode = -1;
+        bool include_g10 = print.config().gcode_flavor == gcfRepRap;
+        if (! custom_gcode_sets_temperature(start_gcode, 104, 109, include_g10, temp_by_gcode, initial_extruder_id)) {
+            // change the tool to the first extruder
+            _write(file, m_writer.toolchange(initial_extruder_id));
+            this->_print_first_layer_extruder_temperatures(file, print, start_gcode, initial_extruder_id, false);
+        }
+    }
 
     // adds tag for processor
     _write_format(file, ";%s%s\n", GCodeProcessor::Extrusion_Role_Tag.c_str(), ExtrusionEntity::role_to_string(erCustom).c_str());
@@ -1757,14 +1864,11 @@ void GCode::_do_export(Print& print, FILE* file, ThumbnailsGeneratorCallback thu
                 }
             }
         }
-        // **mtr** add code to release tools for reprap.
+        // **mtr** add code to release managed tools.
         if (std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) {
             for (uint16_t tool_id : tool_ordering.all_extruders()) {
                 if (bool(print.config().manage_tool_lifecycle.get_at(tool_id))) {
-                    std::string rel_tool_code = std::string(print.config().tool_release_gcode.get_at(tool_id));
-                    std::string tool_name = std::string(print.config().tool_name.get_at(tool_id));
-                    _write_format(file, "M563 P%d %s ; release the virtual tool\n",
-                        tool_id, rel_tool_code.c_str() );
+                    _write(file, m_writer.release_virtual_tool(tool_id));
                 }
             }
         }
@@ -1944,7 +2048,7 @@ static bool custom_gcode_sets_temperature(const std::string &gcode, const int mc
                             int mtool =strtol(++ptr, &endptr, 10);
                             if (endptr > ptr) {
                                 ptr = endptr;
-                                if (mtool = tool_id) {
+                                if (mtool == tool_id) {
                                     found_tool = true;
                                     found_temp_and_tool = true;
                                 }
