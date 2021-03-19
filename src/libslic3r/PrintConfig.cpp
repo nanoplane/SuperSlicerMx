@@ -2480,15 +2480,6 @@ void PrintConfigDef::init_fff_params()
     // Empty string means no mix ratio defined.
     def->set_default_value(new ConfigOptionStrings {"D0:1:2:3 H1 F1 "});
 
-    def = this->add("tool_release_gcode", coStrings);
-    def->label = L("Tool Release gcode");
-    def->gui_type = "one_string";
-    //def->full_width = true;
-    def->width = 20;
-    def->tooltip = L("If Manage_Tool_lifecycle is set, this gcode is included at the end of the gcode using the M563 command to release the associated tool for this virtual extruder. This should be set to dissasociate Drive and Heater ");
-    // Empty string means no mix ratio defined.
-    def->set_default_value(new ConfigOptionStrings {"D-1 H-1"});
-
     def = this->add("max_fan_speed", coInts);
     def->label = L("Max");
     def->full_label = ("Max fan speed");
@@ -4302,7 +4293,6 @@ void PrintConfigDef::init_extruder_option_keys()
         "single_extruder_mixer",
         "manage_tool_lifecycle",
         "tool_create_gcode",
-        "tool_release_gcode",
         "mix_filaments_count",
         "extruder_mix_ratios",
         "extruder_gradient",

@@ -1015,12 +1015,6 @@ std::vector<const PrintInstance*> sort_object_instances_by_model_order(const Pri
 }
 
 
-//std::vector<float> get_layer_mix_ratio(float height)
-//{
-//    for (std::pair<int, std::vector<ExtruderMixandChangePts>> mix, m_mix_ratios) {
-//        
-//    }
-//}
 
 // forward declaration so I don't move code too much **mtr**
 static bool custom_gcode_sets_temperature(const std::string &gcode, const int mcode_set_temp_dont_wait, const int mcode_set_temp_and_wait, const bool include_g10, int &temp_out, int tool_id);
@@ -1028,18 +1022,302 @@ static bool custom_gcode_sets_temperature(const std::string &gcode, const int mc
 // forward declaration so I don't move code too much **mtr**
 static bool custom_gcode_sets_bed_temperature(const std::string &gcode, const int mcode_set_temp_dont_wait, const int mcode_set_temp_and_wait, int &temp_out);
 
+
+// implementations for Mixing Extruder clases
+
+/*
+ * so the trick here is to parse the ratio arrays, convert to min_height - max_height range
+ * then parse change point array and create the mapping as vector of height to vector of mix ratio pairs
+ *
+ */
+ExtruderMixAndChangePts::ExtruderMixAndChangePts(int num_filaments, std::string ratios, std::string change_points,bool gradient, bool absolute, double min_height, double max_height)
+{
+    m_gradient = gradient;
+    m_absolute = absolute;
+    
+    const char *ptr = ratios.data();
+    
+    std::vector<double> mheights;
+    std::vector<std::vector<double>> mratios;
+    std::vector<double> val;
+    int fil = 0;
+    double total=0;
+    
+    // parse and normalize the ratios
+    while (*ptr != 0) {
+        char *endptr = nullptr;
+        double ratio = strtod(ptr, &endptr);
+        if (ptr != endptr) {
+            val.push_back(ratio);
+            total += ratio;
+            ++fil;
+        }
+        ptr = endptr;
+        // skip whitespace
+        for (; *ptr == ' ' || *ptr == '\t'; ++ ptr);
+
+        if (fil > 0 && ((strchr("\r\n\0", *ptr) != nullptr)|| fil >= num_filaments)) {
+            if (fil < num_filaments) {
+                // not enought entries, make them up
+                for (int i =1; i< num_filaments; i++) {
+                    val.push_back(0.0);
+                }
+            }
+            // Now adjust the values to be within the range of 0 to 1.0
+            for (int i=0; i < val.size(); i++) {
+                val[i] = val[i]/total;
+            }
+            mratios.push_back(val);
+            total = 0.0;
+            fil = 0;
+            val.clear();
+            // skip the rest of the line
+            for(;strchr("\n\r\0",*ptr) == nullptr; ptr++) ;
+            // if we're done, leave now.
+            if (*ptr == '\0')
+                break;
+        } else
+            ptr++;
+        //skip any empty space and lines
+        for(;*ptr != '\0' && strchr(" \n\r\t", *ptr) != nullptr; ptr++) ;
+    }
+    
+    //ok, now transform and normalize the Height values
+    ptr = change_points.data();
+    mheights.clear();
+    total = 0;
+    ptr = change_points.data();
+    
+    while (*ptr != '\0') {
+        char *endptr = nullptr;
+        double height = strtod(ptr, &endptr);
+        if (ptr != endptr) {
+            mheights.push_back(height);
+            ptr = endptr;
+        } else {
+            //empty line
+            mheights.push_back(-1);
+            ptr++;
+        }
+        // skip the rest of the line
+        for(;strchr("\n\r\0",*ptr) == nullptr; ptr++) ;
+        // skip line terminations
+        for (;*ptr == '\n' || *ptr == '\r'; ptr++) ;
+        // if we're done, leave now.
+        if (*ptr == '\0')
+            break;
+    }
+    // trim or expand if need be, pushing -1 into new values
+     
+    // mheights are ordered from the top down still.
+    if (m_absolute) {
+        // height is an absolute height above the base.
+        // handle the top one first
+        size_t rs = mratios.size();
+        size_t hs = mheights.size();
+        rs = gradient? rs -1 : rs;
+        if ((hs) > rs) {
+            for (int i = rs; i < hs; i++) mheights.pop_back();
+        } else if ( hs  < rs) {
+            for (int i = hs; i < rs; i++) mheights.push_back(-1);
+        }
+        
+            
+        // process and interpret the values.
+        int empty_count = 0;
+        // count the number of empties
+        
+        for (double i : mheights) {
+            empty_count += i < 0? 1 : 0;
+        }
+        double total_height = max_height - min_height;
+
+        if (mheights.front() < 0) {
+            mheights.front() = max_height;
+            empty_count--;
+        }
+        // handle the bottom one
+        if (mheights.back() < 0) {
+            mheights.back() = min_height;
+            empty_count--;
+        }
+        if (empty_count > 0) {
+            // so, now we need to divide up the remaining space amongst the center 'N' rows.
+            // We walk our way down the list, finding empty areas and divide it up evenly.
+            double ht = mheights[0];
+            for (int i = 1; i < mheights.size(); i++) {
+                if (mheights[i] > 0) {
+                    ht = mheights[i];;
+                }else {
+                    int j;
+                    // look for the next valid height
+                    for (j=i+1;mheights[j] < 0; j++);
+                    // so, now we can determine what they should be..
+                    mheights[j] = mheights[j] <= ht ? mheights[j] : ht;
+                    double space_per_ht = (mheights[i] - mheights[j]) / (1+j - i);
+                    for( ; i < j; i++) {
+                        mheights[i] = ht - space_per_ht;
+                        ht = mheights[i];
+                    }
+                    i++;
+                }
+            }
+        }
+    } else {
+        // height represents the space the transition between the current mix and
+        // the next mix should take.  Note this pushes everything down if the
+        // specified combination of heights exceeds the available height.
+        //
+        // compute the available height for distribution
+        size_t rs = mratios.size(); // one fewer section.
+        size_t hs = mheights.size();
+        if ((hs) > rs) {
+            for (int i = rs; i < hs; i++) mheights.pop_back();
+        } else if ( hs  < rs) {
+            for (int i = hs; i < rs; i++) mheights.push_back(-1);
+        }
+        
+            
+        // process and interpret the values.
+        int empty_count = 0;
+        // count the number of empties
+        // ignore the last one on gradients.
+        
+        double total_height = max_height - min_height;
+        double ht_used = 0;
+        int mhsize = mheights.size();
+        double space_per_empty;
+
+        // calc the height used to include all of them
+        for (double ht : mheights) ht_used += ht >= 0 ? ht:0;
+        ht_used = ht_used < total_height ? ht_used : total_height;
+        if (gradient) {
+            // we ignore the last one.
+            for (int i=0; i < (mhsize -1); i++) {
+                empty_count += mheights[i] < 0? 1 : 0;
+            }
+            space_per_empty = (total_height - ht_used)/ empty_count;
+            //fill in the empties
+            for (int i = 0; i < mhsize - 1; i++) {
+                if (mheights[i] < 0) mheights[i] = space_per_empty;
+            }
+            // the last one is special
+            mheights.back() = min_height;
+
+        } else {
+            for (int i=0; i < mhsize; i++) {
+                empty_count += mheights[i] < 0? 1 : 0;
+            }
+            space_per_empty = (total_height - ht_used)/ empty_count;
+            //fill in the empties
+            for (int i = 0; i < mhsize; i++) {
+                if (mheights[i] < 0) mheights[i] = space_per_empty;
+            }
+
+        }
+        // note. ht_used may be the total height, meaing the space per "empty"
+        // will be zero.
+        // divide up the un-defined spaces
+        
+        // now, replace those values with specific heights.. basically computing an Absolute height..
+        //starting at the top note that we account for gradient or layer modeling here.
+        // for a gradient, the height is used to define the point where the change occurs.
+        //
+        if (gradient) {
+            double this_height = max_height;
+            double dh =mheights[0];
+            for (int i = 0; i < mhsize -1; i++) {
+                dh = mheights[i];
+                mheights[i] = MAX(this_height, min_height);
+                this_height -= dh;
+            }
+        } else {
+            // not a gradient, the heights should be where the color changes
+            double this_height = max_height;
+            double dh =mheights[0];
+            for (int i = 0; i < mheights.size(); i++) {
+                dh = mheights[i];
+                mheights[i] = MAX(this_height - dh, min_height);
+                this_height -= dh;
+            }
+
+        }
+    }
+    // now we pull it all together
+    for (int i = 0; i < mheights.size(); i++) {
+        m_mix_ratio_map.push_back(std::make_pair(mheights[i], mratios[i]));
+    }
+}
+
+// get the layer mix ratios for the current height
+std::vector<double> ExtruderMixAndChangePts:: get_layer_mix_ratio(double height)
+{
+    std::vector<double> rslt;
+    
+    // if we're below the bottom, return the bottom mix.
+    if (height <= m_mix_ratio_map.back().first)
+        return m_mix_ratio_map.back().second;
+    // if we're above the top, return the top mix
+    if (height >= m_mix_ratio_map.front().first)
+        return m_mix_ratio_map.front().second;
+    
+    //fancy, we're somewhere in the middle
+    for (int i = m_mix_ratio_map.size() - 1; i >= 0; i--) {
+        if (height < m_mix_ratio_map[i].first) {
+            if (m_gradient) {
+                // calculate a new vector<double> that contains the calculated proportional values.
+                std::vector<double> above = m_mix_ratio_map[i].second;
+                std::vector<double> below = m_mix_ratio_map[i + 1].second;
+                double fraction = (height - m_mix_ratio_map[i + 1].first) / (m_mix_ratio_map[i].first - m_mix_ratio_map[i+1].first);
+                for (int j=0; j < above.size(); j++) {
+                    rslt.push_back((below[j] + ((above[j] - below[j])*fraction)));
+                }
+                return rslt;
+
+            } else {
+                return m_mix_ratio_map[i+1].second;
+            }
+        }
+    }
+    return m_mix_ratio_map.front().second; // over the top.
+}
+
+// get the current mix ratios for the specified tool at the current height,
+//needs_change is set to true if it's different from the last layer checked.
+std::vector<double> MixingExtruderLayers::layer_mix_change(int tool_id, double z, bool &needs_change)
+{
+    std::vector<double> result;
+    needs_change = false;
+    auto search = m_mix_map.find(tool_id);
+    result = search->second->mix_points->get_layer_mix_ratio(z);
+    if (result != search->second->last_mix_values) {
+        needs_change = true;
+    }
+    return result;
+        
+}
+
+
 // initialize and create virtual mixing extruders.  this needs to be done at the beginning before any tools are used
 // even before any custom G-Code is run.  note, currently only works for reprap GCode flavor
-void GCode::_init_mixing_extruders(FILE* file, Print& print, GCodeWriter& writer, ToolOrdering& tool_ordering, const std::string& custom_gcode)
+std::string MixingExtruderLayers::init_mixing_extruders(GCode &gcodegen, Print& print, ToolOrdering& tool_ordering)
 {
-    if (std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) {
+    std::ostringstream gcode;
+    
+    if ((std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) ||
+        (std::set<uint8_t>{gcfMarlin}.count(print.config().gcode_flavor.value) > 0)) {
+        
+        // first collect and translate the mix ratios, filling up the m_mix_refs vector... maybe make it a map.
+        // iterate through the extruders, generate the ExtruderMixAnChangePts objects adding them to
+        //the m_mix_refs map.
+        
+        
         for (uint16_t tool_id : tool_ordering.all_extruders()) {
             // If we're managing tool creation, we need to create them first
             if (bool(print.config().manage_tool_lifecycle.get_at(tool_id))) {
                 std::string gen_tool_code = std::string(print.config().tool_create_gcode.get_at(tool_id));
                 std::string tool_name = std::string(print.config().tool_name.get_at(tool_id));
-                _write_format(file, "M563 P%d %s S\"%s\"; Create the virtual tool\n",
-                    tool_id, gen_tool_code.c_str(), tool_name.c_str());
+                gcode << gcodegen.writer().create_virtual_tool(tool_id, gen_tool_code.c_str(), tool_name.c_str());
                 // if firmware extraction is set, we need to set that up..
                 if (bool(print.config().use_firmware_retraction)) {
                     double length = print.config().retract_length.get_at(tool_id);
@@ -1047,27 +1325,63 @@ void GCode::_init_mixing_extruders(FILE* file, Print& print, GCodeWriter& writer
                     double lift = print.config().retract_lift.get_at(tool_id);
                     double speed = print.config().retract_speed.get_at(tool_id)*60; //mm/minute
                     length /= num_mix_filaments;
-                    _write_format(file, "M207 P%d S%.2f F%.0f Z%.2f  ; Set firmware retraction\n",
-                        tool_id, length, speed, lift);
+                    gcode << gcodegen.writer().set_tool_fimrware_retraction(tool_id, length, speed, lift);
 
                 }
             }
             // and if it's a mixing extruder, we need to set the mix ratio.
             if (bool(print.config().single_extruder_mixer.get_at(tool_id))) {
                 std::string mix_ratios = std::string(print.config().extruder_mix_ratios.get_at(tool_id));
-                // get the last ratio in the list since it will be the bottom ratio
-                std::stringstream mix_stream(mix_ratios);
-                std::string this_ratio;
-                std::string last_ratio;
-                while (getline(mix_stream, this_ratio)) {
-                    last_ratio = this_ratio;
+                std::string change_points = std::string(print.config().extruder_mix_change_points.get_at(tool_id));
+                bool gradient = print.config().extruder_gradient.get_at(tool_id);
+                bool absolute = print.config().extruder_mix_absolute.get_at(tool_id);
+                int num_filaments = print.config().mix_filaments_count.get_at(tool_id);
+                double min_height = 0; // need to figure out what the "real" minimum height of the object is...
+                double max_height = 0;
+                // get the min and max heights for the assoicated objects..
+                BoundingBoxf3 global_bounding_box;
+                BoundingBoxf3 b_box;
+                bool found = false;
+                // walk the list of objects calculating the bounding box for all objects that use
+                // the tool_id/extruder
+                for ( PrintObject *po : print.objects()) {
+                            // there's our extruder hiding in there...
+                    for (const PrintInstance &instance : po->instances()) {
+                        for (ModelVolume* mv :
+                             instance.model_instance->get_object()->volumes) {
+                            uint16_t extruder_id = mv->extruder_id()-1;
+                            if (extruder_id == tool_id) {
+                                // found it.. now we just need to get the bounding box of this volume.
+                                b_box = instance.model_instance->get_object()->bounding_box();
+                                
+                                if (global_bounding_box.size().norm() == 0) {
+                                    global_bounding_box = b_box;
+                                } else {
+                                    global_bounding_box.merge(b_box);
+                                }
+                            }
+                        }
+                    }
                 }
-                _write_format(file, "M567 P%d E%s  ; Set the initial mix ratio\n\n",
-                              tool_id, last_ratio.c_str());
+                min_height = global_bounding_box.min.z();
+                max_height = global_bounding_box.size().z();
+                // now create and add this to the mix_refs
+                ExtruderMixAndChangePts * m_and_cp =
+                new ExtruderMixAndChangePts(num_filaments, mix_ratios,change_points, gradient, absolute, min_height, max_height);
+                Mixer *mix = new Mixer;
+                mix->mix_points = m_and_cp;
+                mix->last_mix_values = m_and_cp->get_layer_mix_ratio(min_height);
+                m_mix_map.insert({tool_id, mix});
+                // output the initial mix for this tool.
+                gcode << gcodegen.writer().set_tool_mix(tool_id,
+                                                        m_and_cp->get_layer_mix_ratio(min_height));
             }
         }
     }
+    return gcode.str();
 }
+
+
 
 // set standby temp for extruders
 // Parse the custom G-code, try to find T, and add it if not present
@@ -1076,7 +1390,8 @@ void GCode::_init_multiextruders(FILE *file, Print &print, GCodeWriter & writer,
 {
 
     //set tools and  temp for reprap
-    if (std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) {
+    if ((std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) ||
+        (std::set<uint8_t>{gcfMarlin}.count(print.config().gcode_flavor.value) > 0)) {
         for (uint16_t tool_id : tool_ordering.all_extruders()) {
             int standby_temp = int(print.config().temperature.get_at(tool_id));
             if (standby_temp > 0) {
@@ -1378,8 +1693,10 @@ void GCode::_do_export(Print& print, FILE* file, ThumbnailsGeneratorCallback thu
     if(this->config().gcode_flavor != gcfKlipper && print.config().first_layer_bed_temperature.get_at(initial_extruder_id) != 0)
         this->_print_first_layer_bed_temperature(file, print, start_gcode, initial_extruder_id, false);
 
-    // init (virtual) mixing extruders.  Also sets initial mix rations for all mixing extruders. need to do this before setting temps or extruding.
-    this->_init_mixing_extruders(file, print, m_writer, tool_ordering, start_gcode);
+    // init (virtual) mixing extruders.  Also sets initial mix ratios for all mixing extruders.
+    //need to do this before setting temps or extruding.
+    // returns gcode for virtual tool creation and initial configuration
+    _write(file, this->m_mixer_layers.init_mixing_extruders(*this, print, tool_ordering));
 
     //init extruders
     this->_init_multiextruders(file, print, m_writer, tool_ordering, start_gcode);
@@ -1391,7 +1708,7 @@ void GCode::_do_export(Print& print, FILE* file, ThumbnailsGeneratorCallback thu
         if (! custom_gcode_sets_temperature(start_gcode, 104, 109, include_g10, temp_by_gcode, initial_extruder_id)) {
             // change the tool to the first extruder
             _write(file, m_writer.toolchange(initial_extruder_id));
-            this->_print_first_layer_extruder_temperatures(file, print, start_gcode, initial_extruder_id, true);
+            this->_print_first_layer_extruder_temperatures(file, print, start_gcode, initial_extruder_id, false);
         }
     }
 
@@ -1642,14 +1959,11 @@ void GCode::_do_export(Print& print, FILE* file, ThumbnailsGeneratorCallback thu
                 }
             }
         }
-        // **mtr** add code to release tools for reprap.
+        // **mtr** add code to release managed tools.
         if (std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) {
             for (uint16_t tool_id : tool_ordering.all_extruders()) {
                 if (bool(print.config().manage_tool_lifecycle.get_at(tool_id))) {
-                    std::string rel_tool_code = std::string(print.config().tool_release_gcode.get_at(tool_id));
-                    std::string tool_name = std::string(print.config().tool_name.get_at(tool_id));
-                    _write_format(file, "M563 P%d %s ; release the virtual tool\n",
-                        tool_id, rel_tool_code.c_str() );
+                    _write(file, m_writer.release_virtual_tool(tool_id));
                 }
             }
         }
@@ -1804,7 +2118,7 @@ static bool custom_gcode_sets_temperature(const std::string &gcode, const int mc
                             int mtool =strtol(++ptr, &endptr, 10);
                             if (endptr > ptr) {
                                 ptr = endptr;
-                                if (mtool = tool_id) {
+                                if (mtool == tool_id) {
                                     found_tool = true;
                                     found_temp_and_tool = true;
                                 }
@@ -2334,6 +2648,17 @@ void GCode::process_layer(
             print.config().layer_gcode.value, m_writer.tool()->id(), &config)
             + "\n";
         config.set_key_value("max_layer_z", new ConfigOptionFloat(m_max_layer_z));
+    }
+    // check and update the mix ratios.
+    ToolOrdering tool_ordering = print.tool_ordering();
+    for (uint16_t tool_id : tool_ordering.all_extruders()) {
+        if (m_config.single_extruder_mixer.get_at(tool_id)) {
+            bool needs_change;
+            std::vector<double> mix = m_mixer_layers.layer_mix_change(tool_id, print_z, needs_change);
+            if (needs_change) {
+                gcode += writer().set_tool_mix(tool_id, mix);
+            }
+        }
     }
 
     if (! first_layer && ! m_second_layer_things_done) {

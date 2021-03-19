@@ -74,6 +74,11 @@ public:
     std::string unretract();
     std::string lift();
     std::string unlift();
+    std::string set_tool_mix(int extruderID, std::vector<double> ratios);
+    std::string create_virtual_tool(int tool_id, std::string drives, std::string name);
+    std::string release_virtual_tool(int tool_id);
+    std::string set_tool_fimrware_retraction(int tool_id, double length,
+                                             double speed, double lift);
     Vec3d       get_position() const { return m_pos; }
 
     void set_extra_lift(double extra_zlift) { this->extra_lift = extra_zlift; }
