@@ -1304,7 +1304,8 @@ std::string MixingExtruderLayers::init_mixing_extruders(GCode &gcodegen, Print& 
 {
     std::ostringstream gcode;
     
-    if (std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) {
+    if ((std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) ||
+        (std::set<uint8_t>{gcfMarlin}.count(print.config().gcode_flavor.value) > 0)) {
         
         // first collect and translate the mix ratios, filling up the m_mix_refs vector... maybe make it a map.
         // iterate through the extruders, generate the ExtruderMixAnChangePts objects adding them to
@@ -1389,7 +1390,8 @@ void GCode::_init_multiextruders(FILE *file, Print &print, GCodeWriter & writer,
 {
 
     //set tools and  temp for reprap
-    if (std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) {
+    if ((std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) ||
+        (std::set<uint8_t>{gcfMarlin}.count(print.config().gcode_flavor.value) > 0)) {
         for (uint16_t tool_id : tool_ordering.all_extruders()) {
             int standby_temp = int(print.config().temperature.get_at(tool_id));
             if (standby_temp > 0) {
