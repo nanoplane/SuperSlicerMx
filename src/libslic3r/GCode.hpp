@@ -130,6 +130,8 @@ public:
                             bool gradient, bool absolute, double min_height, double max_height);
     
     std::vector<double> get_layer_mix_ratio(double height);
+    bool is_absolute() {return m_absolute;}
+    bool is_gradient() {return m_gradient;}
 private:
     bool m_gradient;
     bool m_absolute;
@@ -142,10 +144,15 @@ class MixingExtruderLayers
 {
 public:
     std::string init_mixing_extruders( GCode &gcodegen, Print& print, ToolOrdering& tool_ordering);
-    std::vector<double> layer_mix_change(double z, bool &needs_change);
+    std::vector<double> layer_mix_change(int tool_id, double z, bool &needs_change);
 private:
-    // a map containing mix and change point records per extruder.
-    std::map<int, ExtruderMixAndChangePts *> m_mix_refs;
+    struct Mixer {
+        Mixer() : mix_points(nullptr) {}
+        ExtruderMixAndChangePts * mix_points;
+        std::vector<double>   last_mix_values;
+    };
+    // a map containing Mixer records per extruder.
+    std::map<int, Mixer *> m_mix_map;
 };
 
 class GCode : ExtrusionVisitorConst  {

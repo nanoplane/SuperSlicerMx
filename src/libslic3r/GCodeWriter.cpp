@@ -474,7 +474,7 @@ std::string GCodeWriter::set_tool_mix(int tool_id, std::vector<double> ratios)
 {
     std::ostringstream gcode;
     if (FLAVOR_IS(gcfRepRap)) {
-        gcode << "M567" << tool_id << " E";
+        gcode << "M567 P" << tool_id << " E";
         for (double val : ratios) {
             gcode << ":" << XYZF_NUM(val);
         }
