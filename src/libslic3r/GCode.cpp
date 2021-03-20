@@ -1228,7 +1228,7 @@ ExtruderMixAndChangePts::ExtruderMixAndChangePts(int num_filaments, std::string 
             double dh =mheights[0];
             for (int i = 0; i < mhsize -1; i++) {
                 dh = mheights[i];
-                mheights[i] = MAX(this_height, min_height);
+                mheights[i] = std::max(this_height, min_height);
                 this_height -= dh;
             }
         } else {
@@ -1237,7 +1237,7 @@ ExtruderMixAndChangePts::ExtruderMixAndChangePts(int num_filaments, std::string 
             double dh =mheights[0];
             for (int i = 0; i < mheights.size(); i++) {
                 dh = mheights[i];
-                mheights[i] = MAX(this_height - dh, min_height);
+                mheights[i] = std::max(this_height - dh, min_height);
                 this_height -= dh;
             }
 
