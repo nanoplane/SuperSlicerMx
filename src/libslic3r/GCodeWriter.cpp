@@ -493,7 +493,7 @@ std::string GCodeWriter::set_tool_mix(int tool_id, std::vector<double> ratios)
         } else {
             int i=0;
             for (double val : ratios) {
-                gcode << "M163 S" << i << " P" << val << "\n";
+                gcode << "M163 S" << i++ << " P" << val << "\n";
             }
             gcode << " M164 S" << tool_id;
         }
