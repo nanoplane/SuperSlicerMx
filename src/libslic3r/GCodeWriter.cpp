@@ -478,23 +478,27 @@ std::string GCodeWriter::set_tool_mix(int tool_id, std::vector<double> ratios)
         for (double val : ratios) {
             gcode << ":" << XYZF_NUM(val);
         }
-        gcode << "M164 S" << tool_id << " ";
     }
     else if (FLAVOR_IS(gcfMarlin)) {
-        int i=0;
         if (tool_id == 0) {
             // tool 0 is "special" since in a mixing scenario, it's the only one that's real
             // so... we just set the mix directly. up to 6 components... at least I think this will work.
             //M165 A0.2 B0.4 C0.3 D0.1 H0.0 I0.0
             gcode << "M165 ";
             std::string drivers = "ABCDHI";
-            int i = 0;
+            int i=0;
             for (double val : ratios) {
                 gcode << drivers[i++]  << XYZF_NUM(val) << " ";
             }
+        } else {
+            int i=0;
+            for (double val : ratios) {
+                gcode << "M163 S" << i << " P" << val << "\n";
+            }
+            gcode << " M164 S" << tool_id;
         }
     }
-    gcode << "; set mix ratio\n";
+    gcode << " ; set mix ratio\n";
     
     return gcode.str();
 }
