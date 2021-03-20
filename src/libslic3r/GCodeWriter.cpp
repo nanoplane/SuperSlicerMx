@@ -403,8 +403,8 @@ std::string GCodeWriter::create_virtual_tool(int tool_id, std::string drives, st
 {
     std::ostringstream gcode;
     if (FLAVOR_IS(gcfRepRap))
-        gcode << "M563 P" << tool_id << " " << drives << " S" << name
-        << " ; create virtual tool\n";
+        gcode << "M563 P" << tool_id << " " << drives << " S\"" << name
+        << "\" ; create virtual tool\n";
     else
         gcode << "; create Marlin virtual tool - NOT!\n";
     
