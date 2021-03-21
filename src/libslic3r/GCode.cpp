@@ -1053,13 +1053,14 @@ ExtruderMixAndChangePts::ExtruderMixAndChangePts(int num_filaments, std::string 
             ++fil;
         }
         ptr = endptr;
-        // skip whitespace
-        for (; *ptr == ' ' || *ptr == '\t'; ++ ptr);
+        // skip anything that isn't a ":" or the end of line or end of buffer
+        //for (; *ptr != ':' && *ptr != '\n' && *ptr != '\n' && *ptr != '\0'; ++ ptr);
+        for (; strchr(":\n\r\0", *ptr) == nullptr; ptr++);
 
         if (fil > 0 && ((strchr("\r\n\0", *ptr) != nullptr)|| fil >= num_filaments)) {
             if (fil < num_filaments) {
                 // not enought entries, make them up
-                for (int i =1; i< num_filaments; i++) {
+                for (int i =fil; i< num_filaments; i++) {
                     val.push_back(0.0);
                 }
             }
@@ -1072,7 +1073,7 @@ ExtruderMixAndChangePts::ExtruderMixAndChangePts(int num_filaments, std::string 
             fil = 0;
             val.clear();
             // skip the rest of the line
-            for(;strchr("\n\r\0",*ptr) == nullptr; ptr++) ;
+            //for(;strchr("\n\r\0",*ptr) == nullptr; ptr++) ;
             // if we're done, leave now.
             if (*ptr == '\0')
                 break;
@@ -1107,60 +1108,59 @@ ExtruderMixAndChangePts::ExtruderMixAndChangePts(int num_filaments, std::string 
         if (*ptr == '\0')
             break;
     }
+    
     // trim or expand if need be, pushing -1 into new values
-     
+    size_t rs = mratios.size();
+    size_t hs = mheights.size();
+    if ((hs) > rs) {
+        for (int i = rs; i < hs; i++) mheights.pop_back();
+    } else if ( hs  < rs) {
+        for (int i = hs; i < rs; i++) mheights.push_back(-1);
+    }
+    
+    // how many empties
+    int empty_count = 0;
+    for (double i : mheights) {
+        empty_count += i < 0? 1 : 0;
+    }
+
     // mheights are ordered from the top down still.
     if (m_absolute) {
         // height is an absolute height above the base.
         // handle the top one first
-        size_t rs = mratios.size();
-        size_t hs = mheights.size();
-        rs = gradient? rs -1 : rs;
-        if ((hs) > rs) {
-            for (int i = rs; i < hs; i++) mheights.pop_back();
-        } else if ( hs  < rs) {
-            for (int i = hs; i < rs; i++) mheights.push_back(-1);
-        }
-        
             
         // process and interpret the values.
-        int empty_count = 0;
+
         // count the number of empties
         
-        for (double i : mheights) {
-            empty_count += i < 0? 1 : 0;
-        }
-        double total_height = max_height - min_height;
+         double total_height = max_height - min_height;
 
+        // compute the top height if it's "blank" or adjust the available height if it's not
         if (mheights.front() < 0) {
             mheights.front() = max_height;
             empty_count--;
+        } else if (mheights.front() < max_height){
+            total_height -= max_height - mheights.front();
         }
-        // handle the bottom one
+        
+        // handle the bottom height if it's open or adjust the available height if it's not.
         if (mheights.back() < 0) {
             mheights.back() = min_height;
             empty_count--;
+        } else if (mheights.back() > min_height) {
+            total_height -= mheights.back() - min_height;
         }
+        double space_per_ht = total_height / (empty_count+1);
+
         if (empty_count > 0) {
             // so, now we need to divide up the remaining space amongst the center 'N' rows.
             // We walk our way down the list, finding empty areas and divide it up evenly.
             double ht = mheights[0];
             for (int i = 1; i < mheights.size(); i++) {
-                if (mheights[i] > 0) {
-                    ht = mheights[i];;
-                }else {
-                    int j;
-                    // look for the next valid height
-                    for (j=i+1;mheights[j] < 0; j++);
-                    // so, now we can determine what they should be..
-                    mheights[j] = mheights[j] <= ht ? mheights[j] : ht;
-                    double space_per_ht = (mheights[i] - mheights[j]) / (1+j - i);
-                    for( ; i < j; i++) {
-                        mheights[i] = ht - space_per_ht;
-                        ht = mheights[i];
-                    }
-                    i++;
+                if (mheights[i] < 0) {
+                    mheights[i] = ht - space_per_ht;
                 }
+                ht = mheights[i];;
             }
         }
     } else {
@@ -1168,25 +1168,14 @@ ExtruderMixAndChangePts::ExtruderMixAndChangePts(int num_filaments, std::string 
         // the next mix should take.  Note this pushes everything down if the
         // specified combination of heights exceeds the available height.
         //
-        // compute the available height for distribution
-        size_t rs = mratios.size(); // one fewer section.
-        size_t hs = mheights.size();
-        if ((hs) > rs) {
-            for (int i = rs; i < hs; i++) mheights.pop_back();
-        } else if ( hs  < rs) {
-            for (int i = hs; i < rs; i++) mheights.push_back(-1);
-        }
-        
+
             
         // process and interpret the values.
-        int empty_count = 0;
-        // count the number of empties
-        // ignore the last one on gradients.
-        
+         
         double total_height = max_height - min_height;
         double ht_used = 0;
         int mhsize = mheights.size();
-        double space_per_empty;
+        double space_per_empty = 0;
 
         // calc the height used to include all of them
         for (double ht : mheights) ht_used += ht >= 0 ? ht:0;
@@ -1292,6 +1281,7 @@ std::vector<double> MixingExtruderLayers::layer_mix_change(int tool_id, double z
     result = search->second->mix_points->get_layer_mix_ratio(z);
     if (result != search->second->last_mix_values) {
         needs_change = true;
+        m_mix_map[tool_id]->last_mix_values = result;
     }
     return result;
         
