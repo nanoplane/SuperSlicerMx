@@ -1807,10 +1807,10 @@ void GCode::_do_export(Print& print, FILE* file, ThumbnailsGeneratorCallback thu
         int temp_by_gcode = -1;
         bool include_g10 = print.config().gcode_flavor == gcfRepRap;
         if (! custom_gcode_sets_temperature(start_gcode, 104, 109, include_g10, temp_by_gcode, initial_extruder_id)) {
-            // change the tool to the first extruder
-            _write(file, m_writer.toolchange(initial_extruder_id));
             this->_print_first_layer_extruder_temperatures(file, print, start_gcode, initial_extruder_id, false);
-        }
+            // change the tool to the first extruder
+            //_write(file, m_writer.toolchange(initial_extruder_id));
+      }
     }
 
     // adds tag for processor
