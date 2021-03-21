@@ -416,7 +416,7 @@ std::string GCodeWriter::release_virtual_tool(int tool_id)
 {
     std::ostringstream gcode;
     if (FLAVOR_IS(gcfRepRap)) {
-        gcode << "M563 P" << tool_id << " D-1 H-1 ; Let the tool go";
+        gcode << "M563 P" << tool_id << " D-1 H-1 ; Let the tool go\n";
     }
     
     return gcode.str();
@@ -429,8 +429,8 @@ std::string GCodeWriter::set_tool_mix(int tool_id, std::vector<double> ratios)
     std::ostringstream gcode;
     if (FLAVOR_IS(gcfRepRap)) {
         gcode << "M567 P" << tool_id << " E";
-        for (double val : ratios) {
-            gcode << ":" << XYZF_NUM(val);
+        for (int i=0; i< ratios.size(); i++) {
+            gcode << (i>0 ? ":" : "") << XYZF_NUM(ratios[i]);
         }
     }
     else if (FLAVOR_IS(gcfMarlin)) {
