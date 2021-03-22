@@ -4573,7 +4573,7 @@ std::string GCode::set_extruder(unsigned int extruder_id, double print_z, bool n
         int temp = (m_layer_index <= 0 && m_config.first_layer_temperature.get_at(extruder_id) > 0 ? m_config.first_layer_temperature.get_at(extruder_id) :
                                          m_config.temperature.get_at(extruder_id));
         if (temp > 0)
-            gcode += m_writer.set_temperature(temp, false);
+            gcode += m_writer.set_temperature(temp, false, extruder_id);
         
     }
 
