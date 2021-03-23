@@ -1118,7 +1118,6 @@ ExtruderMixAndChangePts::ExtruderMixAndChangePts(int num_filaments, std::string 
     
     const char *ptr = ratios.data();
     
-    std::vector<double> mheights;
     std::vector<std::vector<double>> mratios;
     std::vector<double> val;
     int fil = 0;
@@ -1166,6 +1165,8 @@ ExtruderMixAndChangePts::ExtruderMixAndChangePts(int num_filaments, std::string 
     
     //ok, now transform and normalize the Height values
     ptr = change_points.data();
+    std::vector<double> mheights;
+    
     mheights.clear();
     total = 0;
     ptr = change_points.data();
@@ -1199,7 +1200,7 @@ ExtruderMixAndChangePts::ExtruderMixAndChangePts(int num_filaments, std::string 
         for (int i = hs; i < rs; i++) mheights.push_back(-1);
     }
     
-    // how many empties
+    // how many empties in the list
     int empty_count = 0;
     for (double i : mheights) {
         empty_count += i < 0? 1 : 0;
@@ -1208,48 +1209,67 @@ ExtruderMixAndChangePts::ExtruderMixAndChangePts(int num_filaments, std::string 
     // mheights are ordered from the top down still.
     if (m_absolute) {
         // height is an absolute height above the base.
-        // handle the top one first
+                    
+        double total_height = max_height - min_height;
+        // handle the top and bottom differently for Gradients
+        if (gradient) {
+            // if it's a gradient and the front mheight is blank, make the front mheight max_height.
+            // compute the top height if it's "blank" or adjust the available height if it's not
+            if (mheights.front() < 0) {
+                mheights.front() = max_height;
+                empty_count--;
+            } else {
+                mheights.front() = std::min(mheights.front(), total_height);
+                total_height -= max_height - mheights.front();
+            }
             
-        // process and interpret the values.
-
-        // count the number of empties
-        
-         double total_height = max_height - min_height;
-
-        // compute the top height if it's "blank" or adjust the available height if it's not
-        if (mheights.front() < 0) {
-            mheights.front() = max_height;
-            empty_count--;
-        } else if (mheights.front() < max_height){
-            total_height -= max_height - mheights.front();
-        }
-        
-        // handle the bottom height if it's open or adjust the available height if it's not.
-        if (mheights.back() < 0) {
-            mheights.back() = min_height;
-            empty_count--;
-        } else if (mheights.back() > min_height) {
-            total_height -= mheights.back() - min_height;
-        }
-        double space_per_ht = total_height / (empty_count+1);
-
-        if (empty_count > 0) {
-            // so, now we need to divide up the remaining space amongst the center 'N' rows.
-            // We walk our way down the list, finding empty areas and divide it up evenly.
-            double ht = mheights[0];
-            for (int i = 1; i < mheights.size(); i++) {
-                if (mheights[i] < 0) {
-                    mheights[i] = ht - space_per_ht;
-                }
-                ht = mheights[i];;
+            // handle the bottom height if it's open or adjust the available height if it's not.
+            // if it's a gradient and the back mheight is blank, make it min_height
+            if (mheights.back() < 0) {
+                mheights.back() = min_height;
+                empty_count--;
+            } else {
+                mheights.back() = std::max(mheights.back(), min_height);
+                total_height -= mheights.back() - min_height;
+            }
+        } else {
+            // if not a gradient, just make sure the heights are within the range min_heigt to max_height
+            if (mheights.front() >= 0) {
+                mheights.front() = std::min(mheights.front(), total_height);
+            }
+            if (mheights.back() >= 0){
+                mheights.back() = std::max(mheights.back(), min_height);
             }
         }
-    } else {
-        // height represents the space the transition between the current mix and
-        // the next mix should take.  Note this pushes everything down if the
-        // specified combination of heights exceeds the available height.
-        //
 
+
+        // so, now we need to divide up any blank space amongst the rows.
+        // We walk our way down the list, finding empty areas and divide it up evenly.  Also check for
+        // monotonicity
+        double ht = max_height;
+        double space_per_ht;
+        for (int i = 0; i < mheights.size() ; i++) {
+            if (mheights[i] < 0) {
+                // search for the next non-empty
+                int cnt = 2;
+                for (int j = i+1;  j < mheights.size(); j++ ) {
+                    if (mheights[j] < 0) {
+                        cnt++;
+                    } else {
+                        space_per_ht = (ht - mheights[j])/(cnt);
+                        break;
+                    }
+                }
+                mheights[i] = ht - space_per_ht;
+            } else {
+                mheights[i] = std::max(std::min(mheights[i], ht), mheights.back()); // going down?.
+            }
+            ht = mheights[i];
+        }
+    } else {
+        // height represents the space the transition should take that starts with the
+        // assosciated mix ratio.  This means any value in the top entry will always be a fixed color.
+        //
             
         // process and interpret the values.
          
@@ -1258,59 +1278,22 @@ ExtruderMixAndChangePts::ExtruderMixAndChangePts(int num_filaments, std::string 
         int mhsize = mheights.size();
         double space_per_empty = 0;
 
-        // calc the height used to include all of them
+        // calc the height used
         for (double ht : mheights) ht_used += ht >= 0 ? ht:0;
-        ht_used = ht_used < total_height ? ht_used : total_height;
-        if (gradient) {
-            // we ignore the last one.
-            for (int i=0; i < (mhsize -1); i++) {
-                empty_count += mheights[i] < 0? 1 : 0;
-            }
-            space_per_empty = (total_height - ht_used)/ empty_count;
-            //fill in the empties
-            for (int i = 0; i < mhsize - 1; i++) {
-                if (mheights[i] < 0) mheights[i] = space_per_empty;
-            }
-            // the last one is special
-            mheights.back() = min_height;
-
-        } else {
-            for (int i=0; i < mhsize; i++) {
-                empty_count += mheights[i] < 0? 1 : 0;
-            }
-            space_per_empty = (total_height - ht_used)/ empty_count;
-            //fill in the empties
-            for (int i = 0; i < mhsize; i++) {
-                if (mheights[i] < 0) mheights[i] = space_per_empty;
-            }
-
-        }
-        // note. ht_used may be the total height, meaing the space per "empty"
-        // will be zero.
-        // divide up the un-defined spaces
+        // limit it to < the total height.
+        ht_used = std::min(ht_used, total_height);
+        // calc the space per empty spot
+        space_per_empty = (total_height - ht_used)/ empty_count;
         
-        // now, replace those values with specific heights.. basically computing an Absolute height..
-        //starting at the top note that we account for gradient or layer modeling here.
-        // for a gradient, the height is used to define the point where the change occurs.
-        //
-        if (gradient) {
-            double this_height = max_height;
-            double dh =mheights[0];
-            for (int i = 0; i < mhsize -1; i++) {
-                dh = mheights[i];
-                mheights[i] = std::max(this_height, min_height);
-                this_height -= dh;
+        // now calc/set the actual heights.
+        double ht = max_height;
+        for (int i = 0; i < mhsize; i++) {
+            if (mheights[i] < 0) {
+                mheights[i] = ht - space_per_empty;
+            } else {
+                mheights[i] = std::max(std::min(ht - mheights[i], ht), min_height); // always going down.
             }
-        } else {
-            // not a gradient, the heights should be where the color changes
-            double this_height = max_height;
-            double dh =mheights[0];
-            for (int i = 0; i < mheights.size(); i++) {
-                dh = mheights[i];
-                mheights[i] = std::max(this_height - dh, min_height);
-                this_height -= dh;
-            }
-
+            ht = mheights[i];
         }
     }
     // now we pull it all together
