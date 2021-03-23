@@ -96,7 +96,7 @@ static wxIcon main_frame_icon(GUI_App::EAppMode app_mode)
         if (app_mode == GUI_App::EAppMode::GCodeViewer) {
             // Only in case the slicer was started with --gcodeviewer parameter try to load the icon from prusa-gcodeviewer.exe
             // Otherwise load it from the exe.
-            for (const std::wstring_view exe_name : { std::wstring_view(L"superslicer.exe"), std::wstring_view(L"superslicer_console.exe") })
+            for (const std::wstring_view exe_name : { std::wstring_view(L"superslicerMx.exe"), std::wstring_view(L"superslicer_console.exe") })
                 if (boost::iends_with(path, exe_name)) {
                     path.erase(path.end() - exe_name.size(), path.end());
                     path += L"prusa-gcodeviewer.exe";
@@ -150,7 +150,7 @@ DPIFrame(NULL, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxDEFAULT_FRAME_S
 	m_statusbar->embed(this);
     m_statusbar->set_status_text(_L("Version") + " " +
         SLIC3R_VERSION +
-        _L("Remember to check for updates at https://github.com/supermerill/SuperSlicer/releases"));
+        _L("Remember to check for updates at https://github.com/nanoplane/SuperSlicerMx/releases"));
 
     // initialize tabpanel and menubar
     init_tabpanel();
@@ -869,11 +869,11 @@ static wxMenu* generate_help_menu()
 {
     wxMenu* helpMenu = new wxMenu();
     append_menu_item(helpMenu, wxID_ANY, _L("SuperSlicer Releases"), _L("Open the SuperSlicer releases page in your browser"),
-        [](wxCommandEvent&) { wxLaunchDefaultBrowser("http://github.com/supermerill/SuperSlicer/releases"); });
+        [](wxCommandEvent&) { wxLaunchDefaultBrowser("http://github.com/nanoplane/SuperSlicerMx/releases"); });
     append_menu_item(helpMenu, wxID_ANY, _L("SuperSlicer wiki"), _L("Open the SuperSlicer wiki in your browser"),
-        [](wxCommandEvent&) { wxLaunchDefaultBrowser("http://github.com/supermerill/SuperSlicer/wiki"); });
+        [](wxCommandEvent&) { wxLaunchDefaultBrowser("http://github.com/nanoplane/SuperSlicerMx/wiki"); });
     append_menu_item(helpMenu, wxID_ANY, _L("SuperSlicer website"), _L("Open the SuperSlicer website in your browser"),
-        [](wxCommandEvent&) { wxLaunchDefaultBrowser("http://github.com/supermerill/SuperSlicer"); });
+        [](wxCommandEvent&) { wxLaunchDefaultBrowser("http://github.com/nanoplane/SuperSlicerMx"); });
     append_menu_item(helpMenu, wxID_ANY, _L("Prusa Edition website"), _L("Open the Prusa Edition website in your browser"),
         [](wxCommandEvent&) { wxLaunchDefaultBrowser("http://github.com/prusa3d/PrusaSlicer"); });
     //#        my $versioncheck = $self->_append_menu_item($helpMenu, "Check for &Updates...", "Check for new Slic3r versions", sub{
@@ -892,7 +892,7 @@ static wxMenu* generate_help_menu()
     append_menu_item(helpMenu, wxID_ANY, _L("Show &Configuration Folder"), _L("Show user configuration folder (datadir)"),
         [](wxCommandEvent&) { Slic3r::GUI::desktop_open_datadir_folder(); });
     append_menu_item(helpMenu, wxID_ANY, _L("Report an I&ssue"), wxString::Format(_L("Report an issue on %s"), SLIC3R_APP_NAME),
-        [](wxCommandEvent&) { wxLaunchDefaultBrowser("http://github.com/supermerill/SuperSlicer/issues/new"); });
+        [](wxCommandEvent&) { wxLaunchDefaultBrowser("http://github.com/nanoplane/SuperSlicerMx/issues/new"); });
 
     if (wxGetApp().is_editor())
         append_menu_item(helpMenu, wxID_ANY, wxString::Format(_L("&About %s"), SLIC3R_APP_NAME), _L("Show about dialog"),
