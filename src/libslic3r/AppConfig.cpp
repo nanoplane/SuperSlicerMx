@@ -30,7 +30,7 @@ namespace Slic3r {
 
 static const std::string VENDOR_PREFIX = "vendor:";
 static const std::string MODEL_PREFIX = "model:";
-static const std::string VERSION_CHECK_URL = "https://api.github.com/repos/" SLIC3R_GITHUB "/releases";
+static const std::string VERSION_CHECK_URL = "https://api.github.com/repos/nanoplane/superslicermx/releases";
 
 const std::string AppConfig::SECTION_FILAMENTS = "filaments";
 const std::string AppConfig::SECTION_MATERIALS = "sla_materials";
@@ -387,7 +387,7 @@ std::string AppConfig::load()
         /*
         throw Slic3r::RuntimeError(
         	_utf8(L("Error parsing " SLIC3R_APP_NAME " config file, it is probably corrupted. "
-                    "Try to manually delete the file to recover from the error. Your user profiles will not be affected.")) + 
+                    "Try to manually delete the file to recover from the error. Your user profiles will not be affected.")) +
         	"\n\n" + AppConfig::config_path() + "\n\n" + ex.what());
         */
         return ex.what();
