@@ -2803,7 +2803,7 @@ void GCode::process_layer(
         if (m_config.single_extruder_mixer.get_at(tool_id)) {
             bool needs_change;
             std::vector<double> mix = m_mixer_layers.layer_mix_change(tool_id, print_z, needs_change);
-            if (needs_change) {
+            if (needs_change || first_layer) {
                 gcode += writer().set_tool_mix(tool_id, mix);
             }
         }
