@@ -479,7 +479,7 @@ std::string GCodeWriter::set_tool_mix(int tool_id, std::vector<double> ratios)
             gcode << (i>0 ? ":" : "") << XYZF_NUM(ratios[i]);
         }
     }
-    else if (FLAVOR_IS(gcfMarlin)) {
+    else if (FLAVOR_IS(gcfMarlin) || FLAVOR_IS(gcfKlipper)) {
         if (tool_id == 0) {
             // tool 0 is "special" since in a mixing scenario, it's the only one that's real
             // so... we just set the mix directly. up to 6 components... at least I think this will work.
