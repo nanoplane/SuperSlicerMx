@@ -1280,7 +1280,8 @@ std::string MixingExtruderLayers::init_mixing_extruders(GCode &gcodegen, Print& 
     std::ostringstream gcode;
     
     if ((std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) ||
-        (std::set<uint8_t>{gcfMarlin}.count(print.config().gcode_flavor.value) > 0)) {
+        (std::set<uint8_t>{gcfMarlin}.count(print.config().gcode_flavor.value) > 0) ||
+        (std::set<uint8_t>{gcfKlipper}.count(print.config().gcode_flavor.value) > 0)) {
         
         // first collect and translate the mix ratios, filling up the m_mix_refs vector... maybe make it a map.
         // iterate through the extruders, generate the ExtruderMixAnChangePts objects adding them to
