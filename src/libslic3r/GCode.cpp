@@ -1406,7 +1406,7 @@ std::string MixingExtruderLayers::init_mixing_extruders(GCode &gcodegen, Print& 
                     for (const PrintInstance &instance : po->instances()) {
                         for (ModelVolume* mv :
                              instance.model_instance->get_object()->volumes) {
-                            // default is 0, all other start at 1 so subtract.
+                            // default extruder is 0, all other start at 1 so subtract.
                             uint16_t extruder_id = mv->extruder_id() > 0 ? mv->extruder_id()-1 : 0;
                             if ((extruder_id == tool_id)) {
                                 // found it.. now we just need to get the bounding box of this volume.
