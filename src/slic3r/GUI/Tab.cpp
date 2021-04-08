@@ -2791,6 +2791,7 @@ void TabPrinter::build_unregular_pages()
         optgroup->append_single_option_line("wipe_advanced_nozzle_melted_volume");
         optgroup->append_single_option_line("wipe_advanced_multiplier");
         optgroup->append_single_option_line("wipe_advanced_algo");
+        
         m_pages.insert(m_pages.end() - n_after_single_extruder_MM, page);
         m_has_single_extruder_MM_page = true;
         changed = true;
