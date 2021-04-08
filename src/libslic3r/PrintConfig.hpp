@@ -1337,6 +1337,11 @@ public:
     ConfigOptionFloat               wipe_tower_per_color_wipe;
     ConfigOptionFloat               wipe_tower_rotation_angle;
     ConfigOptionFloat               wipe_tower_bridging;
+    ConfigOptionBool                wipe_mix_backflow;
+    ConfigOptionBool                wipe_mix_bubble;
+    ConfigOptionBool                wipe_mix_two_stage;
+    ConfigOptionInt                 wipe_mix_bubble_layers;
+    ConfigOptionFloat               wipe_mix_backflow_amt;
     ConfigOptionFloats              wiping_volumes_matrix;
     ConfigOptionFloats              wiping_volumes_extruders;
     ConfigOptionFloat               z_offset;
@@ -1433,6 +1438,11 @@ protected:
         OPT_PTR(wipe_tower_per_color_wipe);
         OPT_PTR(wipe_tower_rotation_angle);
         OPT_PTR(wipe_tower_bridging);
+        OPT_PTR(wipe_mix_backflow);
+        OPT_PTR(wipe_mix_bubble);
+        OPT_PTR(wipe_mix_two_stage);
+        OPT_PTR(wipe_mix_backflow_amt);
+        OPT_PTR(wipe_mix_bubble_layers);
         OPT_PTR(wiping_volumes_matrix);
         OPT_PTR(wiping_volumes_extruders);
         OPT_PTR(z_offset);

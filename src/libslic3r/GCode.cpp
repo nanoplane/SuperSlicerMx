@@ -1317,7 +1317,6 @@ std::string MixingExtruderLayers::init_mixing_extruders(GCode &gcodegen, Print& 
                 // get the min and max heights for the assoicated objects..
                 BoundingBoxf3 global_bounding_box;
                 BoundingBoxf3 b_box;
-                bool found = false;
                 // walk the list of objects calculating the bounding box for all objects that use
                 // the tool_id/extruder
                 for ( PrintObject *po : print.objects()) {
@@ -1327,7 +1326,7 @@ std::string MixingExtruderLayers::init_mixing_extruders(GCode &gcodegen, Print& 
                              instance.model_instance->get_object()->volumes) {
                             // default extruder is 0, all other start at 1 so subtract.
                             uint16_t extruder_id = mv->extruder_id() > 0 ? mv->extruder_id()-1 : 0;
-                            if ((extruder_id == tool_id)) {
+                            if (extruder_id == tool_id) {
                                 // found it.. now we just need to get the bounding box of this volume.
                                 b_box = instance.model_instance->get_object()->bounding_box();
                                 
