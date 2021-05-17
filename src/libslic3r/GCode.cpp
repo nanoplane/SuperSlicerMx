@@ -488,11 +488,11 @@ static inline void set_extra_lift(const Layer& layer, const Print& print, GCodeW
             if (gcodegen.config().wipe_tower_no_sparse_layers.value) {
                 wipe_tower_z = m_last_wipe_tower_print_z;
                 ignore_sparse = (m_brim_done && m_tool_changes[m_layer_idx].size() == 1 && m_tool_changes[m_layer_idx].front().initial_tool == m_tool_changes[m_layer_idx].front().new_tool);
-                    if (m_tool_change_idx == 0 && !ignore_sparse)
-                       wipe_tower_z = m_last_wipe_tower_print_z + m_tool_changes[m_layer_idx].front().layer_height;
-                }
+                if (m_tool_change_idx == 0 && !ignore_sparse)
+                    wipe_tower_z = m_last_wipe_tower_print_z + m_tool_changes[m_layer_idx].front().layer_height;
+            }
 
-                if (!ignore_sparse) {
+            if (!ignore_sparse) {
                 gcode += append_tcr(gcodegen, m_tool_changes[m_layer_idx][m_tool_change_idx++], extruder_id, wipe_tower_z);
                 m_last_wipe_tower_print_z = wipe_tower_z;
             }
@@ -1366,16 +1366,18 @@ void GCode::_init_multiextruders(FILE *file, Print &print, GCodeWriter & writer,
 {
 
     //set tools and  temp for reprap
-    if ((std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) ||
-        (std::set<uint8_t>{gcfMarlin}.count(print.config().gcode_flavor.value) > 0)) {
+    bool isMarlin = std::set<uint8_t>{gcfMarlin}.count(print.config().gcode_flavor.value) > 0;
+    bool isRepRap = std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0;
+    
+    if (isRepRap) {
         for (uint16_t tool_id : tool_ordering.all_extruders()) {
             int standby_temp = int(print.config().temperature.get_at(tool_id));
             if (standby_temp > 0) {
                 if (print.config().ooze_prevention.value)
                     standby_temp += print.config().standby_temperature_delta.value;
                 _write_format(file, "G10 P%d R%d ; sets the standby temperature\n",
-                    tool_id,
-                    standby_temp);
+                              tool_id,
+                              standby_temp);
             }
         }
         _write_format(file, "\n"); // just to be clean
@@ -1774,6 +1776,7 @@ void GCode::_do_export(Print& print, FILE* file, ThumbnailsGeneratorCallback thu
         this->_print_first_layer_bed_temperature(file, print, start_gcode, initial_extruder_id, true);
     if(print.config().first_layer_temperature.get_at(initial_extruder_id) != 0)
         this->_print_first_layer_extruder_temperatures(file, print, start_gcode, initial_extruder_id, true);
+    // Set the temp for any mixing extruders
 
     // Do all objects for each layer.
     if (print.config().complete_objects.value) {
@@ -2636,6 +2639,25 @@ void GCode::process_layer(
             }
         }
     }
+    
+    if (first_layer) {
+        if (std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) {
+            // set the temps for all the mixing extruders.
+            for (const Extruder &extruder : m_writer.extruders()) {
+                if (print.config().single_extruder_multi_material.value) {
+                    if (print.config().single_extruder_mixer.get_at(extruder.id())) {
+                        // set the temp for all mixing extruders so things don't lock up
+                        // also, need to force a wait if the extruder id is the same as the writer id.
+                        int temperature = print.config().first_layer_temperature.get_at(extruder.id());
+                        bool do_wait = extruder.id() == m_writer.tool()->id();
+                        if(temperature > 0) // don't set it if disabled
+                            gcode += m_writer.set_temperature(temperature, do_wait, extruder.id());
+                    }
+                }
+            }
+        }
+
+    }
 
     if (! first_layer && ! m_second_layer_things_done) {
         // Transition from 1st to 2nd layer. Adjust bed and nozzle temperatures as prescribed by the nozzle dependent
@@ -2643,15 +2665,17 @@ void GCode::process_layer(
             gcode += m_writer.set_bed_temperature(print.config().bed_temperature.get_at(first_extruder_id));
         
         // first_layer_temperature vs. temperature settings.
-        for (const Extruder &extruder : m_writer.extruders()) {
-            if (print.config().single_extruder_multi_material.value) {
-                if (extruder.id() == m_writer.tool()->id() || print.config().single_extruder_mixer.get_at(extruder.id())) {
-                    // In single extruder multi material mode, set the temperature for the current extruder only.. unless we have mixer...
-                    // also, need to force a wait if the extruder id is the same as the writer id.
-                    int temperature = print.config().temperature.get_at(extruder.id());
-                    bool do_wait = extruder.id() == m_writer.tool()->id();
-                    if(temperature > 0) // don't set it if disabled
-                        gcode += m_writer.set_temperature(temperature, do_wait, extruder.id());
+        if (std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) {
+            for (const Extruder &extruder : m_writer.extruders()) {
+                if (print.config().single_extruder_multi_material.value) {
+                    if (extruder.id() == m_writer.tool()->id() || print.config().single_extruder_mixer.get_at(extruder.id())) {
+                        // In single extruder multi material mode, set the temperature for the current extruder only.. unless we have mixer...
+                        // also, need to force a wait if the extruder id is the same as the writer id.
+                        int temperature = print.config().temperature.get_at(extruder.id());
+                        bool do_wait = extruder.id() == m_writer.tool()->id();
+                        if(temperature > 0) // don't set it if disabled
+                            gcode += m_writer.set_temperature(temperature, do_wait, extruder.id());
+                    }
                 }
             }
         }
