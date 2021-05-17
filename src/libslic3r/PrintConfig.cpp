@@ -4768,18 +4768,12 @@ void PrintConfigDef::init_fff_params()
    def->mode = comExpert;
    def->set_default_value(new ConfigOptionBool(false));
 
-   def = this->add("wipe_mix_two_stage", coBool);
-   def->label = L("Enable two stage purge for Mixers");
-   def->tooltip = L("Setting this will perform a two stage purge on a tool change. This will first balance the contents of the mixing chamber by an additional purge of those filaments that will have a lower ratio on the next tool. then it will purge the chamber to the new ratios");
+   def = this->add("wipe_mix_bubble_volume", coFloat);
+   def->label = L("Bubble purge volume");
+   def->tooltip = L("Amount to purge during a bubble purge event");
    def->mode = comExpert;
-   def->set_default_value(new ConfigOptionBool(false));
-
-   def = this->add("wipe_mix_backflow_amt", coFloat);
-   def->label = L("Volume for Backflow purge");
-   def->tooltip = L("This sets the amt for the backflow purge. it's usually quite small, (3 or 4mm^3)");
-                           def->sidetext = L("mm^3");
-   def->mode = comExpert;
-   def->set_default_value(new ConfigOptionFloat(3.0));
+   def->sidetext = L("mm^3");
+   def->set_default_value(new ConfigOptionFloat(10.0));
 
    def = this->add("wipe_mix_bubble_layers", coInt);
    def->label = L("Bubble Purge separation");
@@ -4788,6 +4782,19 @@ void PrintConfigDef::init_fff_params()
    def->mode = comExpert;
    def->set_default_value(new ConfigOptionInt(10));
                            
+   def = this->add("wipe_mix_two_stage", coBool);
+   def->label = L("Enable two stage purge for Mixers");
+   def->tooltip = L("Setting this will perform a two stage purge on a tool change. This will first balance the contents of the mixing chamber by an additional purge of those filaments that will have a lower ratio on the next tool. then it will purge the chamber to the new ratios");
+   def->mode = comExpert;
+   def->set_default_value(new ConfigOptionBool(false));
+
+   def = this->add("wipe_mix_backflow_volume", coFloat);
+   def->label = L("Volume for Backflow purge");
+   def->tooltip = L("This sets the amt for the backflow purge. it's usually quite small, (3 or 4mm^3)");
+   def->sidetext = L("mm^3");
+   def->mode = comExpert;
+   def->set_default_value(new ConfigOptionFloat(3.0));
+
     def = this->add("wipe_tower_brim", coFloatOrPercent);
     def->label = L("Wipe tower brim width");
     def->tooltip = L("Width of the brim for the wipe tower. Can be in mm or in % of the (assumed) only one nozzle diameter.");

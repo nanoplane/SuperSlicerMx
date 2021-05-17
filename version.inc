@@ -5,7 +5,6 @@
 set(SLIC3R_APP_NAME "SuperSlicerMx")
 # Key fo the slicer, must only contains ascii chars and no spaces (be valid in all filesystems)
 set(SLIC3R_APP_KEY "SuperSlicerMx")
-
 # exe name of the slicer, should be lowercase and valid in all os
 set(SLIC3R_APP_CMD "superslicerMx")
 # versions

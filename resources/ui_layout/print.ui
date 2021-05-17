@@ -359,13 +359,14 @@ group:Wipe tower
 	setting:wipe_tower_no_sparse_layers
 	setting:single_extruder_multi_material_priming
 group:Wipe tower Mixer (must enable Wipe Tower)
-	line:Backflow purge
-		setting:wipe_mix_backflow
-		setting:wipe_mix_backflow_amt
-	end_line
 	line:Bubble purge
 		setting:wipe_mix_bubble
 		setting:wipe_mix_bubble_layers
+		setting:wipe_mix_bubble_volume
+	end_line
+	line:Backflow purge
+		setting:wipe_mix_backflow
+		setting:wipe_mix_backflow_volume
 	end_line
 	line: Two stage purge
 		setting:wipe_mix_two_stage
