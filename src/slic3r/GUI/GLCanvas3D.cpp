@@ -2266,9 +2266,10 @@ void GLCanvas3D::reload_scene(bool refresh_immediately, bool force_full_scene_re
         unsigned int extruders_count = (unsigned int)dynamic_cast<const ConfigOptionFloats*>(m_config->option("nozzle_diameter"))->values.size();
 
         bool wt = dynamic_cast<const ConfigOptionBool*>(m_config->option("wipe_tower"))->value;
+        bool bp = dynamic_cast<const ConfigOptionBool*>(m_config->option("wipe_mix_bubble"))->value;
         bool co = dynamic_cast<const ConfigOptionBool*>(m_config->option("complete_objects"))->value;
-
-        if ((extruders_count > 1) && wt && !co) {
+        // **mtr count > 1 or bubble purge
+        if (((extruders_count > 1) || bp) && wt && !co) {
             // Height of a print (Show at least a slab)
             double height = std::max(m_model->bounding_box().max(2), 10.0);
 
@@ -6178,7 +6179,7 @@ void GLCanvas3D::_load_wipe_tower_toolpaths(const std::vector<std::string>& str_
 
         static const float*          color_support() { static float color[4] = { 0.5f, 1.0f, 0.5f, 1.f }; return color; } // greenish
 
-        // For cloring by a tool, return a parsed color.
+        // For coloring by a tool, return a parsed color.
         bool                         color_by_tool() const { return tool_colors != nullptr; }
         size_t                       number_tools()  const { return this->color_by_tool() ? tool_colors->size() / 4 : 0; }
         const float*                 color_tool(size_t tool) const { return tool_colors->data() + tool * 4; }
@@ -6243,7 +6244,7 @@ void GLCanvas3D::_load_wipe_tower_toolpaths(const std::vector<std::string>& str_
             const std::vector<WipeTower::ToolChangeResult> &layer = ctxt.tool_change(idx_layer);
             for (size_t i = 0; i < vols.size(); ++i) {
                 GLVolume &vol = *vols[i];
-                if (vol.print_zs.empty() || vol.print_zs.back() != layer.front().print_z) {
+                if (layer.size() > 0 && ( vol.print_zs.empty() || vol.print_zs.back() != layer.front().print_z)) {
                     vol.print_zs.emplace_back(layer.front().print_z);
                     vol.offsets.emplace_back(vol.indexed_vertex_array.quad_indices.size());
                     vol.offsets.emplace_back(vol.indexed_vertex_array.triangle_indices.size());

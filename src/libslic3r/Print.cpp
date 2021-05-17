@@ -2847,7 +2847,7 @@ bool Print::has_wipe_tower() const
     return 
         ! m_config.spiral_vase.value &&
         m_config.wipe_tower.value && 
-        m_config.nozzle_diameter.values.size() > 1;
+        ((m_config.nozzle_diameter.values.size() > 1) || m_config.wipe_mix_bubble);
 }
 
 const WipeTowerData& Print::wipe_tower_data(size_t extruders_cnt, double first_layer_height, double nozzle_diameter) const
@@ -2858,7 +2858,7 @@ const WipeTowerData& Print::wipe_tower_data(size_t extruders_cnt, double first_l
         float width = float(m_config.wipe_tower_width);
 		float unscaled_brim_width = m_config.wipe_tower_brim.get_abs_value(nozzle_diameter);
 
-        const_cast<Print*>(this)->m_wipe_tower_data.depth = (900.f/width) * float(extruders_cnt - 1);
+        const_cast<Print*>(this)->m_wipe_tower_data.depth = (900.f/width) * float(extruders_cnt - 1) + (m_config.wipe_mix_bubble ? 1:0);
         const_cast<Print*>(this)->m_wipe_tower_data.brim_width = unscaled_brim_width;
     }
 
@@ -2882,7 +2882,7 @@ void Print::_make_wipe_tower()
     // Let the ToolOrdering class know there will be initial priming extrusions at the start of the print.
     m_wipe_tower_data.tool_ordering = ToolOrdering(*this, (unsigned int)-1, true);
 
-    if (! m_wipe_tower_data.tool_ordering.has_wipe_tower())
+    if (! m_wipe_tower_data.tool_ordering.has_wipe_tower() && ! m_config.wipe_mix_bubble)
         // Don't generate any wipe tower.
         return;
 
