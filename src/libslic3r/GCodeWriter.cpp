@@ -442,12 +442,12 @@ std::string GCodeWriter::set_tool_mix(int tool_id, std::vector<double> ratios)
             std::string drivers = "ABCDHI";
             int i=0;
             for (double val : ratios) {
-                gcode << drivers[i++]  << XYZF_NUM(val) << " ";
+                gcode << drivers[i++]  << int(val*100) << " ";
             }
         } else {
             int i=0;
             for (double val : ratios) {
-                gcode << "M163 S" << i++ << " P" << val << "\n";
+                gcode << "M163 S" << i++ << " P" << int(val*100) << "\n";
             }
             gcode << " M164 S" << tool_id;
         }
