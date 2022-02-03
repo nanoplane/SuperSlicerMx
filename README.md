@@ -4,7 +4,7 @@
 
 **A SuperSlicer fork which is a PrusaSlicer fork (which is a slic3r fork)** (previously Slic3r++)
 
-Prebuilt Windows, Linux and macOS 64-bit releases are available through the [git releases page](https://github.com/nanoplane/SuperSlicerMx/releases). The Linux & macOS builds aren't tested (by me), just compiled, so please report any bugs that may occur during use.
+Prebuilt Windows, Linux and macOS 64-bit releases are available through the [git releases page](https://github.com/nanoplane/SuperSlicerMx/releases). 
 Nightly builds are available through the [git actions page](https://github.com/nanoplane/SuperSlicerMx/actions). Click on the build for your platform and then on 'Artifacts (1)' in the top right corner.
 
 SuperSlicerMx takes 3D models (STL, OBJ, AMF) and converts them into G-code
@@ -18,7 +18,8 @@ See the [wiki](https://github.com/supermerill/SuperSlicer/wiki) and
 the [documentation directory](doc/) for information about compilation.
 
 ### What are SuperSlicerMx main features? main new features/differences?
-* Support for Mixing hotEnds on printers using reprap firmware.
+* Support for Mixing hotEnds/nozzles on printers. This includes setting mixing ratios for "extruders"/tools, 
+* support for gradients and layers on a per tool/extruder basis.
 * Updates to better handle Hot End heat management for mixing hotends and virtual extruder "tools"
 * 
 ### Complete changelog [here](https://github.com/nanoplane/SuperSlicerMx/wiki)
