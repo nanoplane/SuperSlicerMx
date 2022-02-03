@@ -52,6 +52,11 @@ if [[ -n "$BUILD_IMAGE" ]]
 then
 echo -n "Creating DMG Image for distribution..."
 {
+    if [ -f "@SLIC3R_APP_KEY".img ]
+    then
+        rm *.dmg *.tar
+    fi
+	
     tar -cvf @SLIC3R_APP_KEY@.tar pack/@SLIC3R_APP_KEY@
 
     # create dmg
