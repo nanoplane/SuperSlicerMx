@@ -1242,6 +1242,7 @@ ExtruderMixAndChangePts::ExtruderMixAndChangePts(int num_filaments, std::string 
                 mheights.back() = std::max(mheights.back(), min_height);
             } else {
                 mheights.back() = min_height;
+                empty_count--;
             }
         }
 
