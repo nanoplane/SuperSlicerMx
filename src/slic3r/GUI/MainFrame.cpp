@@ -1519,7 +1519,7 @@ void MainFrame::init_menubar_as_editor()
         append_menu_item(generationMenu, wxID_ANY, _(L("FreeCad python script")), _(L("Create an object by writing little easy script.")),
             [this](wxCommandEvent&) { wxGetApp().freecad_script_dialog(); });
         append_menu_item(generationMenu, wxID_ANY, _(L("Script help page")), _(L("How to use the FreeCad python script window.")),
-            [this](wxCommandEvent&) { wxLaunchDefaultBrowser("https://github.com/supermerill/SuperSlicer/wiki/FreePySCAD-script-window"); });
+            [this](wxCommandEvent&) { wxLaunchDefaultBrowser("https://github.com/nanoplane/SuperSlicerMx/wiki/FreePySCAD-script-window"); });
 
     }
 
