@@ -81,6 +81,7 @@ CopyrightsDialog::CopyrightsDialog()
 void CopyrightsDialog::fill_entries()
 {
     m_entries = {
+        {"SuperSlicerMx"     , "2022 SuperSlicerMx"                            , "https://github.com/nanoplane/SuperSlicerMx" },
         { "SuperSlicer"     , "2021 SuperSlicer"                            , "https://github.com/supermerill/SuperSlicer" },
         { "Slic3r"          , "2021 Slic3r"                                 , "https://github.com/slic3r/slic3r" },
         { "Prusaslicer"     , "2021 PrusaResearch"                          , "https://github.com/prusa3d/PrusaSlicer" },
