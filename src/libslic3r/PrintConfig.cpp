@@ -1199,7 +1199,7 @@ void PrintConfigDef::init_fff_params()
     def->multiline=true;
     def->height = 6;
     def->tooltip = L("This is used to send the command to setup a mix ratios for mixing extruders. "
-                     "Each line consists of a colon delimited list of fractions that MUST total 1.0"
+                     "Each line consists of a colon delimited list of values that defines the extrusion ratios."
                      " If your hot end doesn't support mixing this is ignored");
     // Empty string means no mix ratio defined.
     def->set_default_value(new ConfigOptionStrings {"0.25:0.25:0.25:0.25"});
