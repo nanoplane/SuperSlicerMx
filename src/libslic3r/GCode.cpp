@@ -1842,17 +1842,7 @@ void GCode::_do_export(Print& print, FILE* file, ThumbnailsGeneratorCallback thu
     if ((initial_extruder_id != (uint16_t)-1) && !this->config().start_gcode_manual && (this->config().gcode_flavor != gcfKlipper || print.config().start_gcode.value.empty()) && print.config().first_layer_temperature.get_at(initial_extruder_id) != 0)
         this->_print_first_layer_extruder_temperatures(file, print, start_gcode, initial_extruder_id, false);
 
-    // Set extruder(s) temperature before and after start G-code. but only if the custom gcode doesn't
-    if ((this->config().gcode_flavor != gcfKlipper || print.config().start_gcode.value.empty()) && print.config().first_layer_temperature.get_at(initial_extruder_id) != 0) {
-        int temp_by_gcode = -1;
-        bool include_g10 = print.config().gcode_flavor == gcfRepRap;
-        if (! custom_gcode_sets_temperature(start_gcode, 104, 109, include_g10, temp_by_gcode, initial_extruder_id)) {
-            this->_print_first_layer_extruder_temperatures(file, print, start_gcode, initial_extruder_id, false);
-            // change the tool to the first extruder
-            //_write(file, m_writer.toolchange(initial_extruder_id));
-      }
-    }
-
+   
     // adds tag for processor
     _write_format(file, ";%s%s\n", GCodeProcessor::Extrusion_Role_Tag.c_str(), ExtrusionEntity::role_to_string(erCustom).c_str());
 
@@ -2475,7 +2465,7 @@ void GCode::_print_first_layer_bed_temperature(FILE *file, Print &print, const s
 void GCode::_print_first_layer_extruder_temperatures(FILE *file, Print &print, const std::string &gcode, uint16_t first_printing_extruder_id, bool wait)
 {
     int  temp_by_gcode     = -1;
-    bool include_g10   = print.config().gcode_flavor == gcfRepRap;
+    bool include_g10   = print.config().gcode_flavor.value == gcfRepRap;
     bool managed = print.config().manage_tool_lifecycle.get_at(first_printing_extruder_id);
     
     // Is the extruder temperature set by the provided custom G-code?
@@ -2499,7 +2489,7 @@ void GCode::_print_first_layer_extruder_temperatures(FILE *file, Print &print, c
                 if (print.config().ooze_prevention.value)
                     temp += print.config().standby_temperature_delta.value;
                 if (temp > 0)
-                    _write(file, m_writer.set_temperature(temp, wait, tool_id));
+                    _write(file, m_writer.set_temperature(temp, wait, tool.id()));
             }
         }
         if (wait || print.config().single_extruder_multi_material.value) {

@@ -476,7 +476,7 @@ std::string GCodeWriter::set_tool_mix(int tool_id, std::vector<double> ratios)
     if (FLAVOR_IS(gcfRepRap)) {
         gcode << "M567 P" << tool_id << " E";
         for (int i=0; i< ratios.size(); i++) {
-            gcode << (i>0 ? ":" : "") << XYZF_NUM(ratios[i]);
+            gcode << (i>0 ? ":" : "") << XYZ_NUM(ratios[i]);
         }
     }
     else if (FLAVOR_IS(gcfMarlin) || FLAVOR_IS(gcfKlipper)) {
@@ -508,7 +508,7 @@ std::string GCodeWriter::set_tool_fimrware_retraction(int tool_id, double length
 {
     std::ostringstream gcode;
     if (FLAVOR_IS(gcfRepRap))
-        gcode << "M207 P" << tool_id << " S" << XYZF_NUM(length) << " F" << speed
+        gcode << "M207 P" << tool_id << " S" << XYZ_NUM(length) << " F" << speed
         << "Z " << lift;
     gcode << "; set firmware retraction \n";
     return gcode.str();
