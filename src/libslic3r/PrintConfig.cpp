@@ -4968,10 +4968,8 @@ void PrintConfigDef::init_extruder_option_keys()
         "tool_name",
         "wipe",
 		"wipe_extra_perimeter",
-<<<<<<< HEAD
         "wipe_only_crossing",
         "wipe_speed",
-=======
         "retract_layer_change",
         "retract_length_toolchange",
         "retract_restart_extra_toolchange",
@@ -4983,7 +4981,7 @@ void PrintConfigDef::init_extruder_option_keys()
         "mix_filaments_count",
         "extruder_mix_ratio",
         "default_filament_profile"
->>>>>>> 88a8367cb (added mixing hot end support)
+
     };
 
     m_extruder_retract_keys = {
