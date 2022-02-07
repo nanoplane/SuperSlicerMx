@@ -21,6 +21,7 @@ git clone https://github.com/supermerill/SuperSlicer.git
 and then you have to clone the profiles submodules
 
 ```
+git submodule init
 cd resources/profiles
 git submodule update
 ```
