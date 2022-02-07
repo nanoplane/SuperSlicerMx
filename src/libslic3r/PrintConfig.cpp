@@ -4778,7 +4778,7 @@ void PrintConfigDef::init_fff_params()
    def = this->add("wipe_mix_bubble_layers", coInt);
    def->label = L("Bubble Purge separation");
    def->tooltip = L("This sets the number of layers between bubble purges. typically 10");
-                           def->sidetext = L("layers between purges");
+                           def->sidetext = L("layers");
    def->mode = comExpert;
    def->set_default_value(new ConfigOptionInt(10));
                            
