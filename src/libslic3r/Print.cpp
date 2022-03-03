@@ -2881,8 +2881,8 @@ void Print::_make_wipe_tower()
 
     // Let the ToolOrdering class know there will be initial priming extrusions at the start of the print.
     m_wipe_tower_data.tool_ordering = ToolOrdering(*this, (unsigned int)-1, true);
-
-    if (! m_wipe_tower_data.tool_ordering.has_wipe_tower() && ! m_config.wipe_mix_bubble)
+    // check to see if any wipe tower even needs to be created.
+    if (! m_wipe_tower_data.tool_ordering.has_wipe_tower())
         // Don't generate any wipe tower.
         return;
 
