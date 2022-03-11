@@ -489,7 +489,7 @@ void PrintConfigDef::init_fff_params()
     def->label = L("Max angle");
     def->full_label = L("Brim ear max angle");
     def->category = OptionCategory::skirtBrim;
-    def->tooltip = L("Maximum angle to let a brim ear appear. \nIf set to 0, no brim will be created. \nIf set to ~178, brim will be created on everything but strait sections.");
+    def->tooltip = L("Maximum angle to let a brim ear appear. \nIf set to 0, no brim will be created. \nIf set to ~178, brim will be created on everything but straight sections.");
     def->sidetext = L("°");
     def->min = 0;
     def->max = 180;
@@ -2037,12 +2037,13 @@ void PrintConfigDef::init_fff_params()
     def->set_default_value(new ConfigOptionFloatOrPercent(30, false));
     
     def = this->add("first_layer_infill_speed", coFloatOrPercent);
-    def->label = L("Infill");
-    def->full_label = L("Infill first layer speed");
+    def->label = L("Max infill");
+    def->full_label = L("Infill max first layer speed");
     def->category = OptionCategory::speed;
     def->tooltip = L("If expressed as absolute value in mm/s, this speed will be applied as a maximum for all infill print moves of the first layer."
                    "\nIf expressed as a percentage it will scale the current infill speed."
-                   "\nSet it at 100% to remove any infill first layer speed modification.");
+                   "\nSet it at 100% to remove any infill first layer speed modification."
+                   "\nSet zero to disable (using first_layer_speed instead).");
     def->sidetext = L("mm/s or %");
     def->ratio_over = "depends";
     def->min = 0;
@@ -3773,7 +3774,8 @@ void PrintConfigDef::init_fff_params()
     def->category = OptionCategory::speed;
     def->tooltip = L("This separate setting will affect the speed of perimeters having radius <= 6.5mm "
                    "(usually holes). If expressed as percentage (for example: 80%) it will be calculated "
-                   "on the perimeters speed setting above. Set zero for auto.");
+                   "on the perimeters speed setting above."
+                   "\nSet zero to disable.");
     def->sidetext = L("mm/s or %");
     def->ratio_over = "perimeter_speed";
     def->min = 0;
@@ -6799,6 +6801,7 @@ std::set<const DynamicPrintConfig*> DynamicPrintConfig::value_changed(const t_co
     if (opt_key.find("extrusion_width") != std::string::npos) {
         const ConfigOptionFloats* nozzle_diameter_option = find_option<ConfigOptionFloats>("nozzle_diameter", this, config_collection);
         const ConfigOptionFloat* layer_height_option = find_option<ConfigOptionFloat>("layer_height", this, config_collection);
+        ConfigOptionFloatOrPercent* default_width_option = this->option<ConfigOptionFloatOrPercent>("extrusion_width");
         ConfigOptionFloatOrPercent* width_option = this->option<ConfigOptionFloatOrPercent>(opt_key);
         float overlap_ratio = 1;
         const ConfigOptionPercents* filament_max_overlap_option = find_option<ConfigOptionPercents>("filament_max_overlap", this, config_collection);
@@ -6815,7 +6818,7 @@ std::set<const DynamicPrintConfig*> DynamicPrintConfig::value_changed(const t_co
                     if (width_option) {
                             width_option->set_phony(false);
                             spacing_option->set_phony(true);
-                            Flow flow = Flow::new_from_config_width(FlowRole::frPerimeter, *width_option, max_nozzle_diameter, layer_height_option->value, overlap_ratio, 0);
+                            Flow flow = Flow::new_from_config_width(FlowRole::frPerimeter, width_option->value == 0 ? *width_option : *default_width_option, max_nozzle_diameter, layer_height_option->value, overlap_ratio, 0);
                             if (flow.width < flow.height) flow.height = flow.width;
                             spacing_option->value = (width_option->percent) ? std::round(100 * flow.spacing() / max_nozzle_diameter) : (std::round(flow.spacing() * 10000) / 10000);
                             spacing_option->percent = width_option->percent;
@@ -6827,7 +6830,7 @@ std::set<const DynamicPrintConfig*> DynamicPrintConfig::value_changed(const t_co
                     if (width_option) {
                             width_option->set_phony(false);
                             spacing_option->set_phony(true);
-                            Flow flow = Flow::new_from_config_width(FlowRole::frPerimeter, *width_option, max_nozzle_diameter, layer_height_option->value, overlap_ratio, 0);
+                            Flow flow = Flow::new_from_config_width(FlowRole::frPerimeter, width_option->value == 0 ? *width_option : *default_width_option, max_nozzle_diameter, layer_height_option->value, overlap_ratio, 0);
                             if (flow.width < flow.height) flow.height = flow.width;
                             spacing_option->value = (width_option->percent) ? std::round(100 * flow.spacing() / max_nozzle_diameter) : (std::round(flow.spacing() * 10000) / 10000);
                             spacing_option->percent = width_option->percent;
@@ -6840,7 +6843,7 @@ std::set<const DynamicPrintConfig*> DynamicPrintConfig::value_changed(const t_co
                     if (width_option && perimeter_overlap_option) {
                         width_option->set_phony(false);
                         spacing_option->set_phony(true);
-                        Flow flow = Flow::new_from_config_width(FlowRole::frExternalPerimeter, *width_option, max_nozzle_diameter, layer_height_option->value, overlap_ratio, 0);
+                        Flow flow = Flow::new_from_config_width(FlowRole::frExternalPerimeter, width_option->value == 0 ? *width_option : *default_width_option, max_nozzle_diameter, layer_height_option->value, overlap_ratio, 0);
                         if (flow.width < flow.height) flow.height = flow.width;
                         flow.spacing_ratio = std::min(flow.spacing_ratio, (float)perimeter_overlap_option->get_abs_value(1));
                         spacing_option->value = (width_option->percent) ? std::round(100 * flow.spacing() / max_nozzle_diameter) : (std::round(flow.spacing() * 10000) / 10000);
@@ -6855,7 +6858,7 @@ std::set<const DynamicPrintConfig*> DynamicPrintConfig::value_changed(const t_co
                     if (width_option && external_perimeter_overlap_option) {
                         width_option->set_phony(false);
                         spacing_option->set_phony(true);
-                        Flow ext_perimeter_flow = Flow::new_from_config_width(FlowRole::frPerimeter, *width_option, max_nozzle_diameter, layer_height_option->value, overlap_ratio, 0);
+                        Flow ext_perimeter_flow = Flow::new_from_config_width(FlowRole::frPerimeter, width_option->value == 0 ? *width_option : *default_width_option, max_nozzle_diameter, layer_height_option->value, overlap_ratio, 0);
                         if (ext_perimeter_flow.width < ext_perimeter_flow.height) ext_perimeter_flow.height = ext_perimeter_flow.width;
                         ext_perimeter_flow.spacing_ratio = std::min(ext_perimeter_flow.spacing_ratio * 0.5f, float(external_perimeter_overlap_option->get_abs_value(0.25) + perimeter_overlap_option->get_abs_value(0.25)));
                         spacing_option->value = (width_option->percent) ? std::round(100 * ext_perimeter_flow.spacing() / max_nozzle_diameter) : (std::round(ext_perimeter_flow.spacing() * 10000) / 10000);
@@ -6868,7 +6871,7 @@ std::set<const DynamicPrintConfig*> DynamicPrintConfig::value_changed(const t_co
                     if (width_option) {
                         width_option->set_phony(false);
                         spacing_option->set_phony(true);
-                        Flow flow = Flow::new_from_config_width(FlowRole::frInfill, *width_option, max_nozzle_diameter, layer_height_option->value, overlap_ratio, 0);
+                        Flow flow = Flow::new_from_config_width(FlowRole::frInfill, width_option->value == 0 ? *width_option : *default_width_option, max_nozzle_diameter, layer_height_option->value, overlap_ratio, 0);
                         if (flow.width < flow.height) flow.height = flow.width;
                         spacing_option->value = (width_option->percent) ? std::round(100 * flow.spacing() / max_nozzle_diameter) : (std::round(flow.spacing() * 10000) / 10000);
                         spacing_option->percent = width_option->percent;
@@ -6880,7 +6883,7 @@ std::set<const DynamicPrintConfig*> DynamicPrintConfig::value_changed(const t_co
                     if (width_option) {
                         width_option->set_phony(false);
                         spacing_option->set_phony(true);
-                        Flow flow = Flow::new_from_config_width(FlowRole::frSolidInfill, *width_option, max_nozzle_diameter, layer_height_option->value, overlap_ratio, 0);
+                        Flow flow = Flow::new_from_config_width(FlowRole::frSolidInfill, width_option->value == 0 ? *width_option : *default_width_option, max_nozzle_diameter, layer_height_option->value, overlap_ratio, 0);
                         if (flow.width < flow.height) flow.height = flow.width;
                         spacing_option->value = (width_option->percent) ? std::round(100 * flow.spacing() / max_nozzle_diameter) : (std::round(flow.spacing() * 10000) / 10000);
                         spacing_option->percent = width_option->percent;
@@ -6892,7 +6895,7 @@ std::set<const DynamicPrintConfig*> DynamicPrintConfig::value_changed(const t_co
                     if (width_option) {
                         width_option->set_phony(false);
                         spacing_option->set_phony(true);
-                        Flow flow = Flow::new_from_config_width(FlowRole::frTopSolidInfill, *width_option, max_nozzle_diameter, layer_height_option->value, overlap_ratio, 0);
+                        Flow flow = Flow::new_from_config_width(FlowRole::frTopSolidInfill, width_option->value == 0 ? *width_option : *default_width_option, max_nozzle_diameter, layer_height_option->value, overlap_ratio, 0);
                         if (flow.width < flow.height) flow.height = flow.width;
                         spacing_option->value = (width_option->percent) ? std::round(100 * flow.spacing() / max_nozzle_diameter) : (std::round(flow.spacing() * 10000) / 10000);
                         spacing_option->percent = width_option->percent;
@@ -6900,7 +6903,7 @@ std::set<const DynamicPrintConfig*> DynamicPrintConfig::value_changed(const t_co
                     }
                 }
                 //if (opt_key == "support_material_extrusion_width") {
-                //    Flow flow = Flow::new_from_config_width(FlowRole::frSupportMaterial, *width_option, max_nozzle_diameter, layer_height_option->value, 0);
+                //    Flow flow = Flow::new_from_config_width(FlowRole::frSupportMaterial, width_option->value == 0 ? *width_option : *default_width_option, max_nozzle_diameter, layer_height_option->value, 0);
                 //    if (width_option->percent)
                 //        this->set_key_value("support_material_extrusion_spacing", new ConfigOptionFloatOrPercent(std::round(100 * flow.spacing() / max_nozzle_diameter), true));
                 //    else
@@ -6908,7 +6911,7 @@ std::set<const DynamicPrintConfig*> DynamicPrintConfig::value_changed(const t_co
                 //    something_changed = true;
                 //}
                 //if (opt_key == "skirt_extrusion_width") {
-                //    Flow flow = Flow::new_from_config_width(FlowRole::frPerimeter, *width_option, max_nozzle_diameter, layer_height_option->value, 0);
+                //    Flow flow = Flow::new_from_config_width(FlowRole::frPerimeter, width_option->value == 0 ? *width_option : *default_width_option, max_nozzle_diameter, layer_height_option->value, 0);
                 //    if (width_option->percent)
                 //        this->set_key_value("skirt_extrusion_spacing", new ConfigOptionFloatOrPercent(std::round(100 * flow.spacing() / max_nozzle_diameter), true));
                 //    else
@@ -6930,7 +6933,7 @@ std::set<const DynamicPrintConfig*> DynamicPrintConfig::value_changed(const t_co
                     width_option->percent = true;
                     width_option->set_phony(false);
                     spacing_option->set_phony(true);
-                    Flow flow = Flow::new_from_config_width(FlowRole::frPerimeter, *width_option, max_nozzle_diameter, layer_height_option->value, overlap_ratio, 0);
+                    Flow flow = Flow::new_from_config_width(FlowRole::frPerimeter, width_option->value == 0 ? *width_option : *default_width_option, max_nozzle_diameter, layer_height_option->value, overlap_ratio, 0);
                     spacing_option->value = (width_option->percent) ? std::round(100 * flow.spacing() / max_nozzle_diameter) : (std::round(flow.spacing() * 10000) / 10000);
                     spacing_option->percent = width_option->percent;
                     something_changed = true;

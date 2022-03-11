@@ -2365,8 +2365,8 @@ static void reserve_new_volume_finalize_old_volume(GLVolume& vol_new, GLVolume& 
 
 void GLCanvas3D::load_gcode_preview(const GCodeProcessor::Result& gcode_result, const std::vector<std::string>& str_tool_colors)
 {
-    if (m_dirty_gcode) {
-        m_dirty_gcode = false;
+    if (last_showned_gcode != gcode_result.computed_timestamp) {
+        last_showned_gcode = gcode_result.computed_timestamp;
         m_gcode_viewer.load(gcode_result, *this->fff_print(), m_initialized);
 
         if (wxGetApp().is_editor()) {
@@ -2402,6 +2402,14 @@ void GLCanvas3D::load_sla_preview()
     }
 }
 
+
+bool GLCanvas3D::is_preview_dirty() {
+    const Print* print = this->fff_print();
+    if (print == nullptr)
+        return false;
+    return last_showned_print != print->timestamp_last_change();
+}
+
 void GLCanvas3D::load_preview(const std::vector<std::string>& str_tool_colors, const std::vector<CustomGCode::Item>& color_print_values)
 {
     const Print* print = this->fff_print();
@@ -2410,8 +2418,8 @@ void GLCanvas3D::load_preview(const std::vector<std::string>& str_tool_colors, c
 
     _set_current();
 
-    if (m_dirty_preview || m_volumes.empty()) {
-        m_dirty_preview = false;
+    if (last_showned_print  != print->timestamp_last_change() || m_volumes.empty()) {
+        last_showned_print = print->timestamp_last_change();
         // Release OpenGL data before generating new data.
         this->reset_volumes();
         //note: this isn't releasing all the memory in all os, can make it crash on linux for exemple.
@@ -5267,8 +5275,8 @@ void GLCanvas3D::_check_and_update_toolbar_icon_scale() const
     int   items_cnt = m_main_toolbar.get_visible_items_cnt() + m_undoredo_toolbar.get_visible_items_cnt() + collapse_toolbar.get_visible_items_cnt();
     float noitems_width = top_tb_width - size * items_cnt; // width of separators and borders in top toolbars 
 
-    // calculate scale needed for items in all top toolbars
-    float new_h_scale = (cnv_size.get_width() - noitems_width) / (items_cnt * GLToolbar::Default_Icons_Size);
+    // calculate scale needed for items in all top toolbars (make sure the size is positive even if `cnv_size` is less than `noitems_width`)
+    float new_h_scale = std::max((cnv_size.get_width() - noitems_width), 1.0f) / (items_cnt * GLToolbar::Default_Icons_Size);
 
     items_cnt = m_gizmos.get_selectable_icons_cnt() + 3; // +3 means a place for top and view toolbars and separators in gizmos toolbar
 
@@ -6179,7 +6187,7 @@ void GLCanvas3D::_load_wipe_tower_toolpaths(const std::vector<std::string>& str_
 
         static const float*          color_support() { static float color[4] = { 0.5f, 1.0f, 0.5f, 1.f }; return color; } // greenish
 
-        // For coloring by a tool, return a parsed color.
+        // For cloring by a tool, return a parsed color.
         bool                         color_by_tool() const { return tool_colors != nullptr; }
         size_t                       number_tools()  const { return this->color_by_tool() ? tool_colors->size() / 4 : 0; }
         const float*                 color_tool(size_t tool) const { return tool_colors->data() + tool * 4; }
@@ -6244,7 +6252,7 @@ void GLCanvas3D::_load_wipe_tower_toolpaths(const std::vector<std::string>& str_
             const std::vector<WipeTower::ToolChangeResult> &layer = ctxt.tool_change(idx_layer);
             for (size_t i = 0; i < vols.size(); ++i) {
                 GLVolume &vol = *vols[i];
-                if (layer.size() > 0 && ( vol.print_zs.empty() || vol.print_zs.back() != layer.front().print_z)) {
+                if (vol.print_zs.empty() || vol.print_zs.back() != layer.front().print_z) {
                     vol.print_zs.emplace_back(layer.front().print_z);
                     vol.offsets.emplace_back(vol.indexed_vertex_array.quad_indices.size());
                     vol.offsets.emplace_back(vol.indexed_vertex_array.triangle_indices.size());

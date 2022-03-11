@@ -2982,7 +2982,6 @@ void TabPrinter::toggle_options()
     if (m_active_page->title().StartsWith("Extruder ", &extruder_number) && extruder_number.ToLong(&val) &&
         val > 0 && (size_t)val <= m_extruders_count)
     {
-        
         size_t i = size_t(val) - 1;
         
         bool single_extruder_mix = m_config->opt_bool("single_extruder_mixer", i);
@@ -3006,7 +3005,7 @@ void TabPrinter::toggle_options()
         if (field)
             field->toggle(flavor_reprap && manage_lifecycle);
 
-        // when using firmware retraction, firmware decides retraction length... except if we're managine the lifecycle.
+        // when using firmware retraction, firmware decides retraction length
         bool use_firmware_retraction = m_config->opt_bool("use_firmware_retraction");
         field = get_field("retract_length", i);
         if (field)
@@ -3109,8 +3108,6 @@ void TabPrinter::toggle_options()
                 if (field)
                     field->toggle(enabled);
             }
-        field = get_field("time_estimation_compensation");
-        if (field) field->toggle(machine_limits_usage->value <= MachineLimitsUsage::TimeEstimateOnly);
         update_machine_limits_description(machine_limits_usage->value);
     }
 
