@@ -1226,7 +1226,7 @@ void PrintConfigDef::init_fff_params()
     def->multiline = true;
     def->sidetext = "height";
     def->tooltip = L("Used to define where the mix ratio changes as a height(mm) above the platter "
-                     "or as a layer number depending on the 'as layer' checkbox");
+                     "or as a height of \"this\" layer depending on the \"absolute\" checkbox");
     // Empty string means evenly distribute.
     def->set_default_value(new ConfigOptionStrings {""});
     
