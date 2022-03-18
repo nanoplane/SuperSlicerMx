@@ -2873,7 +2873,7 @@ const WipeTowerData& Print::wipe_tower_data(size_t extruders_cnt, double first_l
         float width = float(m_config.wipe_tower_width);
 		float unscaled_brim_width = m_config.wipe_tower_brim.get_abs_value(nozzle_diameter);
 
-        const_cast<Print*>(this)->m_wipe_tower_data.depth = (900.f/width) * float(extruders_cnt - 1) + (m_config.wipe_mix_bubble ? 1:0);
+        const_cast<Print*>(this)->m_wipe_tower_data.depth = (300.f/width) * (float(extruders_cnt - 1) + (m_config.wipe_mix_bubble ? 1:0));
         const_cast<Print*>(this)->m_wipe_tower_data.brim_width = unscaled_brim_width;
     }
 
