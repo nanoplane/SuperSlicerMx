@@ -30,12 +30,12 @@ void ExtrusionVisitorConst::use(const ExtrusionEntityCollection &collection) { d
 void
 ExtrusionPath::intersect_expolygons(const ExPolygonCollection &collection, ExtrusionEntityCollection* retval) const
 {
-    this->_inflate_collection(intersection_pl((Polylines)polyline, to_polygons(collection.expolygons)), retval);
+    this->_inflate_collection(intersection_pl(Polylines{ polyline }, collection.expolygons), retval);
 }
 
 void ExtrusionPath::subtract_expolygons(const ExPolygonCollection &collection, ExtrusionEntityCollection* retval) const
 {
-    this->_inflate_collection(diff_pl((Polylines)this->polyline, to_polygons(collection.expolygons)), retval);
+    this->_inflate_collection(diff_pl(Polylines{ this->polyline }, collection.expolygons), retval);
 }
 
 void ExtrusionPath::clip_end(double distance)
@@ -70,9 +70,13 @@ void ExtrusionPath::polygons_covered_by_spacing(Polygons &out, const float spaci
 {
     // Instantiating the Flow class to get the line spacing.
     // Don't know the nozzle diameter, setting to zero. It shall not matter it shall be optimized out by the compiler.
-    // if the spacing is negative, use the width instead. can happen on ironing second pass.
-    Flow flow(this->width, this->height, 0.f, spacing_ratio, (this->width*4 < this->height)?true:is_bridge(this->role()));
-    polygons_append(out, offset(this->polyline, 0.5f * double(flow.scaled_spacing()) + scaled_epsilon));
+    bool bridge = is_bridge(this->role()) || (this->width * 4 < this->height);
+    assert(! bridge || this->width == this->height);
+    //TODO: check BRIDGE_FLOW here
+    auto flow = bridge 
+        ? Flow::bridging_flow(this->width, 0.f) 
+        : Flow(this->width, this->height, 0.f, spacing_ratio);
+    polygons_append(out, offset(this->polyline, 0.5f * float(flow.scaled_spacing()) + scaled_epsilon));
 }
 
 bool ExtrusionLoop::make_clockwise()
@@ -154,12 +158,8 @@ bool ExtrusionLoop::split_at_vertex(const Point &point)
     return false;
 }
 
-// Splitting an extrusion loop, possibly made of multiple segments, some of the segments may be bridging.
-void ExtrusionLoop::split_at(const Point &point, bool prefer_non_overhang)
+std::pair<size_t, Point> ExtrusionLoop::get_closest_path_and_point(const Point& point, bool prefer_non_overhang) const
 {
-    if (this->paths.empty())
-        return;
-    
     // Find the closest path and closest point belonging to that path. Avoid overhangs, if asked for.
     size_t path_idx = 0;
     Point  p;
@@ -168,15 +168,15 @@ void ExtrusionLoop::split_at(const Point &point, bool prefer_non_overhang)
         Point  p_non_overhang;
         size_t path_idx_non_overhang = 0;
         double min_non_overhang = std::numeric_limits<double>::max();
-        for (const ExtrusionPath &path : this->paths) {
+        for (const ExtrusionPath& path : this->paths) {
             Point p_tmp = point.projection_onto(path.polyline);
             double dist = (p_tmp - point).cast<double>().norm();
             if (dist < min) {
                 p = p_tmp;
                 min = dist;
                 path_idx = &path - &this->paths.front();
-            } 
-            if (prefer_non_overhang && ! is_bridge(path.role()) && dist < min_non_overhang) {
+            }
+            if (prefer_non_overhang && !is_bridge(path.role()) && dist < min_non_overhang) {
                 p_non_overhang = p_tmp;
                 min_non_overhang = dist;
                 path_idx_non_overhang = &path - &this->paths.front();
@@ -185,9 +185,19 @@ void ExtrusionLoop::split_at(const Point &point, bool prefer_non_overhang)
         if (prefer_non_overhang && min_non_overhang != std::numeric_limits<double>::max()) {
             // Only apply the non-overhang point if there is one.
             path_idx = path_idx_non_overhang;
-            p        = p_non_overhang;
+            p = p_non_overhang;
         }
     }
+    return std::make_pair(path_idx, p);
+}
+
+// Splitting an extrusion loop, possibly made of multiple segments, some of the segments may be bridging.
+void ExtrusionLoop::split_at(const Point &point, bool prefer_non_overhang)
+{
+    if (this->paths.empty())
+        return;
+    
+    auto [path_idx, p] = get_closest_path_and_point(point, prefer_non_overhang);
     
     // now split path_idx in two parts
     const ExtrusionPath &path = this->paths[path_idx];
@@ -196,9 +206,9 @@ void ExtrusionLoop::split_at(const Point &point, bool prefer_non_overhang)
     path.polyline.split_at(p, &p1.polyline, &p2.polyline);
     
     if (this->paths.size() == 1) {
-        if (! p1.polyline.is_valid())
+        if (! p1.polyline.is_valid() || p1.polyline.length() == 0)
             std::swap(this->paths.front().polyline.points, p2.polyline.points);
-        else if (! p2.polyline.is_valid())
+        else if (! p2.polyline.is_valid() || p2.polyline.length() == 0)
             std::swap(this->paths.front().polyline.points, p1.polyline.points);
         else {
             p2.polyline.points.insert(p2.polyline.points.end(), p1.polyline.points.begin() + 1, p1.polyline.points.end());
@@ -207,8 +217,8 @@ void ExtrusionLoop::split_at(const Point &point, bool prefer_non_overhang)
     } else {
         // install the two paths
         this->paths.erase(this->paths.begin() + path_idx);
-        if (p2.polyline.is_valid()) this->paths.insert(this->paths.begin() + path_idx, p2);
-        if (p1.polyline.is_valid()) this->paths.insert(this->paths.begin() + path_idx, p1);
+        if (p2.polyline.is_valid() && p2.polyline.length() > 0) this->paths.insert(this->paths.begin() + path_idx, p2);
+        if (p1.polyline.is_valid() && p1.polyline.length() > 0) this->paths.insert(this->paths.begin() + path_idx, p1);
     }
     
     // split at the new vertex
@@ -314,7 +324,7 @@ ExtrusionRole ExtrusionEntity::string_to_role(const std::string_view role)
         return erThinWall;
     else if (role == L("Gap fill"))
         return erGapFill;
-    else if (role == L("Skirt"))
+    else if (role == L("Skirt") || role == L("Skirt/Brim")) // "Skirt" is for backward compatibility with 2.3.1 and earlier
         return erSkirt;
     else if (role == L("Support material"))
         return erSupportMaterial;

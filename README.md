@@ -1,11 +1,16 @@
 
-[![you can get this shield at shields.io](https://img.shields.io/discord/771316156203270154?color=7289da&logo=discord&logoColor=white)](https://github.com/supermerill/SuperSlicer/issues/611#issuecomment-907833287) 
+
+[![you can get this shield at shields.io](https://img.shields.io/discord/771316156203270154?color=7289da&logo=discord&logoColor=white)](https://github.com/supermerill/SuperSlicer/issues/611#issuecomment-907833287) [![you can get this shield at shields.io](https://img.shields.io/reddit/subreddit-subscribers/slic3r)](https://reddit.com/r/slic3r) [![you can get this shield at shields.io](https://img.shields.io/github/discussions/supermerill/superslicer)](https://github.com/supermerill/SuperSlicer/discussions)
+
+[![Packaging status](https://repology.org/badge/tiny-repos/superslicer.svg)](https://repology.org/project/superslicer/versions) [![you can get this shield at shields.io](https://img.shields.io/chocolatey/v/superslicer)](https://community.chocolatey.org/packages/superslicer) [![you can get this shield at shields.io](https://img.shields.io/homebrew/cask/v/superslicer)](https://formulae.brew.sh/cask/superslicer) [![you can get this shield at shields.io](https://img.shields.io/aur/version/superslicer)](https://aur.archlinux.org/packages/superslicer)
 # SuperSlicerMx
 
 **A SuperSlicer fork which is a PrusaSlicer fork (which is a slic3r fork)** (previously Slic3r++)
 
-Prebuilt Windows, Linux and macOS 64-bit releases are available through the [git releases page](https://github.com/nanoplane/SuperSlicerMx/releases). 
-Nightly builds are available through the [git actions page](https://github.com/nanoplane/SuperSlicerMx/actions). Click on the build for your platform and then on 'Artifacts (1)' in the top right corner.
+
+Prebuilt Windows, Linux and macOS 64-bit releases are available through the [git releases page](https://github.com/nanoplane/SuperSlicerMx/releases). please report any bugs that may occur during use.  
+For **installers**, check the badges above. Windows users can use chocolatey or scoop.  
+Nightly builds are available through the [git actions page](https://github.com/nanoplane/SuperSlicerMx/actions). Click on the build for your platform and then on the archive name (`nightly_win64` or `SuperSlicer-gtk2.AppImage` or `nightly_macos.dmg`) in the "Artifacts" section in the top right corner.
 
 SuperSlicerMx takes 3D models (STL, OBJ, AMF) and converts them into G-code
 instructions for FFF printers or PNG layers for mSLA 3D printers. It's compatible with any modern printer based on the RepRap toolchain which is running a firmware based on Marlin, Prusa, Klipper, etc.
@@ -23,6 +28,23 @@ the [documentation directory](doc/) for information about compilation.
 * Updates to better handle Hot End heat management for mixing hotends and virtual extruder "tools"
 * 
 ### Complete changelog [here](https://github.com/nanoplane/SuperSlicerMx/wiki)
+### What are SuperSlicer main features? main new features/differences?
+
+* Custom-made generated calibration tests.
+* new settings to fine-tune the top surface quality, like 'only one perimeter on top'.
+* A "denser infill" option for supporting the (solid) top layers.
+* Better **Thin walls** (anchored inside the print, no more random bits at the ends, embedded in perimeter loops).
+* Options to change holes dimensions and/or geometry, to print them at the right size.
+* Better overhangs (add perimeters if needed, slice them in opposite direction each layer).
+* Brim rework: many more options (inside, outside only, 'ears', per object)
+* Some new seam options, to help hide them.
+* Built-in calibration prints
+* Built-in object generation script
+* Can join perimeters into a big one to avoid travel moves.
+* Many other little options and corrections (like the filled concentric pattern).
+* It has also all the current slic3rPE/PrusaSlicer features.
+
+### Complete changelog [here](https://github.com/supermerill/SuperSlicer/wiki)
 
 See the wiki for examples.
 

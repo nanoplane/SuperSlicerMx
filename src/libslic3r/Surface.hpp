@@ -52,6 +52,7 @@ inline SurfaceType operator&=(SurfaceType& a, SurfaceType b) {
 //inline bool operator!=(SurfaceType a, SurfaceType b) {
 //    return static_cast<uint16_t>(a) ^ static_cast<uint16_t>(b) != 0;
 //}
+std::string surfaceType_to_string(SurfaceType st);
 
 
 class Surface
@@ -135,7 +136,6 @@ public:
         return *this;
     }
 
-	operator Polygons()  const { return this->expolygon; }
 	double area() 		 const { return this->expolygon.area(); }
     bool empty() const { return expolygon.empty(); }
     void clear() { expolygon.clear(); }
@@ -153,6 +153,16 @@ public:
 typedef std::vector<Surface> Surfaces;
 typedef std::vector<Surface*> SurfacesPtr;
 typedef std::vector<const Surface*> SurfacesConstPtr;
+
+inline Polygons to_polygons(const Surface &surface)
+{
+    return to_polygons(surface.expolygon);
+}
+
+inline Polygons to_polygons(Surface &&surface)
+{
+    return to_polygons(std::move(surface.expolygon));
+}
 
 inline Polygons to_polygons(const Surfaces &src)
 {

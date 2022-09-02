@@ -45,9 +45,14 @@ public:
     ExtrusionEntityCollection(ExtrusionEntityCollection &&other) : m_entities(std::move(other.m_entities)), no_sort(other.no_sort), no_reverse(other.no_reverse) {}
     explicit ExtrusionEntityCollection(const ExtrusionPaths &paths);
     ExtrusionEntityCollection& operator=(const ExtrusionEntityCollection &other);
-    ExtrusionEntityCollection& operator=(ExtrusionEntityCollection &&other)
-        { this->m_entities = std::move(other.m_entities); this->no_sort = other.no_sort; this->no_reverse = other.no_reverse; return *this; }
-    ~ExtrusionEntityCollection() { clear(); }
+    ExtrusionEntityCollection& operator=(ExtrusionEntityCollection &&other) {
+        this->clear();
+        this->m_entities = std::move(other.m_entities);
+        this->no_sort  = other.no_sort;
+        this->no_reverse = other.no_reverse;
+        return *this;
+    }
+    ~ExtrusionEntityCollection() override { clear(); }
 
     /// Operator to convert and flatten this collection to a single vector of ExtrusionPaths.
     explicit operator ExtrusionPaths() const;
@@ -136,6 +141,11 @@ public:
             extrusion_entity->collect_polylines(dst);
     }
 
+    void   collect_points(Points &dst) const override {
+        for (ExtrusionEntity* extrusion_entity : this->entities())
+            extrusion_entity->collect_points(dst);
+    }
+
     double length() const override {
         throw Slic3r::RuntimeError("Calling length() on a ExtrusionEntityCollection");
         return 0.;        
@@ -169,6 +179,23 @@ public:
     virtual void default_use(const ExtrusionEntity &entity) override { to_fill.append(entity); }
     virtual void use(const ExtrusionEntityCollection &coll) override;
 };
+
+#ifdef _DEBUG
+class TestCollection : public ExtrusionVisitorRecursiveConst {
+public:
+    virtual void default_use(const ExtrusionEntity& entity) override {
+        assert(entity.as_polyline().size() > 0);
+    }
+    virtual void use(const ExtrusionEntityCollection& coll) override {
+        for (const ExtrusionEntity* entity : coll.entities()) {
+            assert(entity);
+            std::cout << "entity at " << ((uint64_t)(void*)entity) << "\n";
+            entity->visit(*this);
+        }
+
+    }
+};
+#endif
 
 } // namespace Slic3r
 

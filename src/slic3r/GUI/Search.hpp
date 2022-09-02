@@ -4,6 +4,8 @@
 #include <vector>
 #include <map>
 
+#include <boost/nowide/convert.hpp>
+
 #include <wx/panel.h>
 #include <wx/sizer.h>
 #include <wx/listctrl.h>
@@ -20,6 +22,8 @@
 
 namespace Slic3r {
 
+wxDECLARE_EVENT(wxCUSTOMEVT_JUMP_TO_OPTION, wxCommandEvent);
+
 namespace Search{
 
 class SearchDialog;
@@ -28,12 +32,12 @@ struct InputInfo
 {
     DynamicPrintConfig* config  {nullptr};
     Preset::Type        type    {Preset::TYPE_INVALID};
-    ConfigOptionMode    mode    {comSimple};
 };
 
 struct GroupAndCategory {
     wxString        group;
     wxString        category;
+    ConfigOptionDef gui_opt;
 };
 
 struct Option {
@@ -42,12 +46,17 @@ struct Option {
     //Option() {}
 //public:
 //    bool operator<(const Option& other) const { return other.label > this->label; }
-    bool operator<(const Option& other) const { return other.opt_key > this->opt_key; }
+    bool operator<(const Option& other) const {
+        if (this->type == other.type)
+            return this->key < other.key;
+        return  this->type < other.type;
+    }
 
     // Fuzzy matching works at a character level. Thus matching with wide characters is a safer bet than with short characters,
     // though for some languages (Chinese?) it may not work correctly.
-    std::wstring    opt_key;
+    std::wstring    key;
     Preset::Type    type {Preset::TYPE_INVALID};
+    ConfigOptionMode tags;
     std::wstring    label;
     std::wstring    label_local;
     std::wstring    group;
@@ -56,6 +65,9 @@ struct Option {
     std::wstring    category_local;
     std::wstring    tooltip;
     std::wstring    tooltip_local;
+    std::wstring    tooltip_lowercase;
+    std::wstring    tooltip_local_lowercase;
+    std::string     opt_key() const;
 };
 
 struct FoundOption {
@@ -75,24 +87,27 @@ struct OptionViewParameters
     bool category   {true};
     bool english    {false};
     bool exact      {false};
+    bool all_mode   {true};
 
     int  hovered_id {0};
 };
 
+
 class OptionsSearcher
 {
     std::string                             search_line;
-    std::map<std::string, GroupAndCategory> groups_and_categories;
-    PrinterTechnology                       printer_technology;
+    std::map<std::string, std::vector<GroupAndCategory>> groups_and_categories;
+    PrinterTechnology                       printer_technology {ptAny};
+    ConfigOptionMode                        current_tags {comNone};
 
-    std::vector<Option>                     options {};
+    std::vector<Option>                     options{};
     std::vector<FoundOption>                found {};
+    std::map<ConfigOptionMode, wxString>    tag_label_cache;
 
-    void append_options(DynamicPrintConfig* config, Preset::Type type, ConfigOptionMode mode);
+    void append_options(DynamicPrintConfig* config, Preset::Type type);
 
     void sort_options() {
-        std::sort(options.begin(), options.end(), [](const Option& o1, const Option& o2) {
-            return o1.label < o2.label; });
+        std::sort(options.begin(), options.end());
     }
     void sort_found() {
         std::sort(found.begin(), found.end(), [](const FoundOption& f1, const FoundOption& f2) {
@@ -110,38 +125,34 @@ public:
     OptionsSearcher();
     ~OptionsSearcher();
 
-    void init(std::vector<InputInfo> input_values);
-    void apply(DynamicPrintConfig *config,
-               Preset::Type        type,
-               ConfigOptionMode    mode);
+    void check_and_update(  PrinterTechnology pt_in, 
+                            ConfigOptionMode tags_in, 
+                            std::vector<InputInfo> input_values);
     bool search();
     bool search(const std::string& search, bool force = false);
 
-    void add_key(const std::string& opt_key, const wxString& group, const wxString& category);
+    void add_key(const std::string& opt_key, Preset::Type type, const wxString& group, const wxString& category, const ConfigOptionDef& gui_opt);
 
     size_t size() const         { return found_size(); }
 
     const FoundOption& operator[](const size_t pos) const noexcept { return found[pos]; }
     const Option& get_option(size_t pos_in_filter) const;
-    const Option& get_option(const std::string& opt_key) const;
+    const Option& get_option(const std::string& opt_key, Preset::Type type) const;
+    Option get_option_names(const std::string& opt_key, Preset::Type type) const;
 
     const std::vector<FoundOption>& found_options() { return found; }
-    const GroupAndCategory&         get_group_and_category (const std::string& opt_key) { return groups_and_categories[opt_key]; }
+    const GroupAndCategory&         get_group_and_category (const std::string& opt_key, ConfigOptionMode tags) const;
     std::string& search_string() { return search_line; }
 
-    void set_printer_technology(PrinterTechnology pt) { printer_technology = pt; }
-
-    void sort_options_by_opt_key() {
-        std::sort(options.begin(), options.end(), [](const Option& o1, const Option& o2) {
-            return o1.opt_key < o2.opt_key; });
+    void sort_options_by_key() {
+        sort_options();
     }
+    void sort_options_by_label() { sort_options(); }
 
-    static void register_label_override(t_config_option_key key, std::string label, std::string full_label, std::string tooltip) {
-        label_override.insert({ key, {label, full_label, tooltip} });
-    }
+    void show_dialog();
+    void dlg_sys_color_changed();
+    void dlg_msw_rescale();
 
-private:
-    inline static std::unordered_map< t_config_option_key, std::array<std::string, 3>> label_override;
 };
 
 
@@ -162,6 +173,7 @@ class SearchDialog : public GUI::DPIDialog
     wxCheckBox*         check_category      { nullptr };
     wxCheckBox*         check_english       { nullptr };
     wxCheckBox*         check_exact         { nullptr };
+    wxCheckBox*         check_all_mode      { nullptr };
 
     OptionsSearcher*    searcher            { nullptr };
 
@@ -185,9 +197,11 @@ public:
     void Popup(wxPoint position = wxDefaultPosition);
     void ProcessSelection(wxDataViewItem selection);
 
-protected:
-    void on_dpi_changed(const wxRect& suggested_rect) override;
+    void msw_rescale();
     void on_sys_color_changed() override;
+
+protected:
+    void on_dpi_changed(const wxRect& suggested_rect) override { msw_rescale(); }
 };
 
 

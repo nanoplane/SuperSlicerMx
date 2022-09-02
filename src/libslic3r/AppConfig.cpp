@@ -2,6 +2,7 @@
 #include "libslic3r/Utils.hpp"
 #include "AppConfig.hpp"
 #include "Exception.hpp"
+#include "LocalesUtils.hpp"
 #include "Thread.hpp"
 #include "format.hpp"
 
@@ -10,6 +11,7 @@
 #include <stdexcept>
 
 #include <boost/algorithm/string/predicate.hpp>
+#include <boost/filesystem/directory.hpp>
 #include <boost/filesystem/operations.hpp>
 #include <boost/filesystem/path.hpp>
 #include <boost/format/format_fwd.hpp>
@@ -19,12 +21,15 @@
 #include <boost/nowide/fstream.hpp>
 #include <boost/property_tree/ini_parser.hpp>
 #include <boost/property_tree/ptree_fwd.hpp>
+#include <boost/log/trivial.hpp>
 
 #ifdef WIN32
 //FIXME replace the two following includes with <boost/md5.hpp> after it becomes mainstream.
 #include <boost/uuid/detail/md5.hpp>
 #include <boost/algorithm/hex.hpp>
 #endif
+
+#define L(s) Slic3r::I18N::translate(s)
 
 namespace Slic3r {
 
@@ -38,13 +43,200 @@ const std::string AppConfig::SECTION_MATERIALS = "sla_materials";
 void AppConfig::reset()
 {
     m_storage.clear();
+    m_vendors.clear();
+    m_dirty = false;
+    m_orig_version = Semver::invalid();
+    m_legacy_datadir = false;
     set_defaults();
 };
+
+AppConfig::hsv AppConfig::rgb2hsv(const AppConfig::rgb& in)
+{
+    hsv         out;
+    double      min, max, delta;
+
+    min = in.r < in.g ? in.r : in.g;
+    min = min < in.b ? min : in.b;
+
+    max = in.r > in.g ? in.r : in.g;
+    max = max > in.b ? max : in.b;
+
+    out.v = max;                                // v
+    delta = max - min;
+    if (delta < 0.00001)
+    {
+        out.s = 0;
+        out.h = 0; // undefined, maybe nan?
+        return out;
+    }
+    if (max > 0.0) { // NOTE: if Max is == 0, this divide would cause a crash
+        out.s = (delta / max);                  // s
+    } else {
+        // if max is 0, then r = g = b = 0              
+        // s = 0, h is undefined
+        out.s = 0.0;
+        out.h = NAN;                            // its now undefined
+        return out;
+    }
+    if (in.r >= max)                           // > is bogus, just keeps compilor happy
+        out.h = (in.g - in.b) / delta;        // between yellow & magenta
+    else
+        if (in.g >= max)
+            out.h = 2.0 + (in.b - in.r) / delta;  // between cyan & yellow
+        else
+            out.h = 4.0 + (in.r - in.g) / delta;  // between magenta & cyan
+
+    out.h *= 60.0;                              // degrees
+
+    if (out.h < 0.0)
+        out.h += 360.0;
+
+    return out;
+}
+
+
+AppConfig::rgb AppConfig::hsv2rgb(const AppConfig::hsv& in)
+{
+    double      hh, p, q, t, ff;
+    long        i;
+    rgb         out;
+
+    if (in.s <= 0.0) {       // < is bogus, just shuts up warnings
+        out.r = in.v;
+        out.g = in.v;
+        out.b = in.v;
+        return out;
+    }
+    hh = in.h;
+    if (hh >= 360.0) hh = 0.0;
+    hh /= 60.0;
+    i = (long)hh;
+    ff = hh - i;
+    p = in.v * (1.0 - in.s);
+    q = in.v * (1.0 - (in.s * ff));
+    t = in.v * (1.0 - (in.s * (1.0 - ff)));
+
+    switch (i) {
+    case 0:
+        out.r = in.v;
+        out.g = t;
+        out.b = p;
+        break;
+    case 1:
+        out.r = q;
+        out.g = in.v;
+        out.b = p;
+        break;
+    case 2:
+        out.r = p;
+        out.g = in.v;
+        out.b = t;
+        break;
+
+    case 3:
+        out.r = p;
+        out.g = q;
+        out.b = in.v;
+        break;
+    case 4:
+        out.r = t;
+        out.g = p;
+        out.b = in.v;
+        break;
+    case 5:
+    default:
+        out.r = in.v;
+        out.g = p;
+        out.b = q;
+        break;
+    }
+    return out;
+}
+
+uint32_t AppConfig::hex2int(const std::string& hex)
+{
+    uint32_t int_color;
+    if (hex.empty() || !(hex.size() == 6 || hex.size() == 7)) {
+        int_color = 0x2172eb;
+    } else {
+        std::stringstream ss;
+        ss << std::hex << (hex[0] == '#' ? hex.substr(1) : hex);
+        ss >> int_color;
+    }
+    // #RRVVBB so r in in the high bit, but we store it in the low one in an int
+    uint32_t good_int_color = 0;
+    good_int_color |= ((int_color & 0xFF0000) >> 16);
+    good_int_color |= ((int_color & 0xFF00));
+    good_int_color |= ((int_color & 0xFF) << 16);
+    return good_int_color;
+}
+
+std::string AppConfig::int2hex(uint32_t int_color)
+{
+    std::stringstream ss;
+    ss << std::hex << ((int_color & 0xF0) >> 4) << ((int_color & 0xF));
+    ss << ((int_color & 0xF000) >> 12) << ((int_color & 0xF00) >> 8);
+    ss << ((int_color & 0xF00000) >> 20) << ((int_color & 0xF0000) >> 16);
+    return ss.str();
+}
+
+AppConfig::rgb AppConfig::int2rgb(uint32_t int_color)
+{
+    return AppConfig::rgb{
+            ((int_color & 0xFF)) / 255.,
+            ((int_color & 0xFF00) >> 8) / 255.,
+            ((int_color & 0xFF0000) >> 16) / 255.,
+    };
+}
+uint32_t AppConfig::rgb2int(const AppConfig::rgb& rgb_color)
+{
+    uint32_t int_color = 0;
+    int_color |= std::min(255, int(rgb_color.r * 255));
+    int_color |= std::min(255, int(rgb_color.g * 255)) << 8;
+    int_color |= std::min(255, int(rgb_color.b * 255)) << 16;
+    return int_color;
+}
+
+uint32_t AppConfig::create_color(float saturation, float value, EAppColorType color_template)
+{
+    std::string hex_str;
+    switch (color_template) {
+    case EAppColorType::Highlight:
+        hex_str = get("color_dark");
+        break;
+    case EAppColorType::Platter:
+        hex_str = get("color_light");
+        break;
+    case EAppColorType::Main:
+    default:
+        hex_str = get("color");
+        break;
+    }
+
+    uint32_t int_color = hex2int(hex_str);
+    rgb rgb_color = int2rgb(int_color);
+    hsv hsv_color = rgb2hsv(rgb_color);
+
+    //modify h& v
+    //saturation & value higher than 0.8will increase the sat/value
+    // values lower will decrease it
+    hsv_color.s = std::min(1., hsv_color.s * 1.25 * saturation);
+    hsv_color.v = std::min(1., hsv_color.v * 1.25 * value);
+
+    rgb_color = hsv2rgb(hsv_color);
+    
+    //use the other endian style
+    return rgb2int(rgb_color);
+}
 
 // Override missing or keys with their defaults.
 void AppConfig::set_defaults()
 {
+
+    init_ui_layout();
+
     if (m_mode == EAppMode::Editor) {
+
         // Reset the empty fields to defaults.
         if (get("autocenter").empty())
             set("autocenter", "0");
@@ -63,12 +255,43 @@ void AppConfig::set_defaults()
 
         if (get("show_drop_project_dialog").empty())
             set("show_drop_project_dialog", "1");
-		
+
         if (get("drop_project_action").empty())
             set("drop_project_action", "1");
 
-        if (get("freecad_path").empty())
+        if (get("freecad_path").empty() || get("freecad_path") == ".") {
             set("freecad_path", ".");
+            //try to find it
+#ifdef _WIN32
+            //windows
+            boost::filesystem::path prg_files = "C:/Program Files";
+            boost::filesystem::path freecad_path;
+            if (boost::filesystem::exists(prg_files)) {
+                for (boost::filesystem::directory_entry& prg_dir : boost::filesystem::directory_iterator(prg_files)) {
+                    if (prg_dir.status().type() == boost::filesystem::file_type::directory_file
+                         && boost::starts_with(prg_dir.path().filename().string(), "FreeCAD")
+                         && (freecad_path.empty() || freecad_path.filename().string() < prg_dir.path().filename().string())) {
+                        freecad_path = prg_dir.path();
+                    }
+                }
+            }
+            if (!freecad_path.empty())
+                set("freecad_path", freecad_path.string());
+#else
+#ifdef __APPLE__
+            //apple
+            if (boost::filesystem::exists("/Applications/FreeCAD.app/Contents/Frameworks/FreeCAD/lib"))
+                set("freecad_path", "/Applications/FreeCAD.app/Contents/Frameworks/FreeCAD");
+
+#else
+            // linux
+            if (boost::filesystem::exists("/usr/lib/freecad/lib"))
+                set("freecad_path", "/usr/lib/freecad");
+            else if (boost::filesystem::exists("/usr/local/bin/FreeCAD/lib"))
+                set("freecad_path", "/usr/local/bin/FreeCAD");
+#endif
+#endif
+        }
 
         if (get("show_overwrite_dialog").empty())
             set("show_overwrite_dialog", "1");
@@ -76,12 +299,16 @@ void AppConfig::set_defaults()
         if (get("tab_icon_size").empty())
             set("tab_icon_size", "32");
 
+        if (get("font_size").empty())
+            set("font_size", "0");
+
         //get default color from the ini file
 
         //try to load colors from ui file
-        std::map<std::string, std::string> key2color = { {"Gui_color_very_dark", "ada230"}, {"Gui_color_dark", "cabe39"}, {"Gui_color", "eddc21"}, {"Gui_color_light", "ffee38"}, {"Gui_color_very_light", "fef48b"} };
+        m_tags.clear();
+        std::map<std::string, std::string> key2color = { {"Gui_color_dark", "cabe39"}, {"Gui_color", "eddc21"}, {"Gui_color_light", "ffee38"} };
         boost::property_tree::ptree tree_colors;
-        boost::filesystem::path path_colors = boost::filesystem::path(resources_dir()) / "ui_layout" / "colors.ini";
+        boost::filesystem::path path_colors = boost::filesystem::path(layout_config_path()) / "colors.ini";
         try {
             boost::nowide::ifstream ifs;
             ifs.imbue(boost::locale::generator()("en_US.UTF-8"));
@@ -92,6 +319,8 @@ void AppConfig::set_defaults()
                 std::string color_code = tree_colors.get<std::string>(it->first);
                 if (color_code.length() == 6)
                     it->second = color_code;
+                else if (color_code.length() == 7)
+                    it->second = color_code.substr(1);
             }
         }
         catch (const std::ifstream::failure& err) {
@@ -100,9 +329,6 @@ void AppConfig::set_defaults()
         catch (const std::runtime_error& err) {
             trace(1, (std::string("Failed loading the color file. Reason: ") + err.what(), path_colors.string()).c_str());
         }
-
-        if (get("color_very_dark").empty())
-            set("color_very_dark", key2color["Gui_color_very_dark"]);
 
         if (get("color_dark").empty())
             set("color_dark", key2color["Gui_color_dark"]);
@@ -113,9 +339,6 @@ void AppConfig::set_defaults()
         if (get("color_light").empty())
             set("color_light", key2color["Gui_color_light"]);
 
-        if (get("color_very_light").empty())
-            set("color_very_light", key2color["Gui_color_very_light"]);
-
         if (get("version_check").empty())
             set("version_check", "1");
 
@@ -125,14 +348,18 @@ void AppConfig::set_defaults()
         if (get("export_sources_full_pathnames").empty())
             set("export_sources_full_pathnames", "0");
 
-#if ENABLE_CUSTOMIZABLE_FILES_ASSOCIATION_ON_WIN
 #ifdef _WIN32
         if (get("associate_3mf").empty())
             set("associate_3mf", "0");
         if (get("associate_stl").empty())
             set("associate_stl", "0");
+
+        if (get("tabs_as_menu").empty())
+            set("tabs_as_menu", "0");
+
+        if (get("check_blacklisted_library").empty())
+            set("check_blacklisted_library", "1");
 #endif // _WIN32
-#endif // ENABLE_CUSTOMIZABLE_FILES_ASSOCIATION_ON_WIN
 
         // remove old 'use_legacy_opengl' parameter from this config, if present
         if (!get("use_legacy_opengl").empty())
@@ -158,6 +385,13 @@ void AppConfig::set_defaults()
         if (get("remember_output_path_removable").empty())
             set("remember_output_path_removable", "1");
 
+        if (get("date_in_config_file").empty())
+            set("date_in_config_file", "1");
+        set_header_generate_with_date(get("date_in_config_file") == "1");
+
+        if (get("check_material_export").empty())
+            set("check_material_export", "0");
+
         if (get("use_custom_toolbar_size").empty())
             set("use_custom_toolbar_size", "0");
 
@@ -167,6 +401,9 @@ void AppConfig::set_defaults()
         if (get("suppress_hyperlinks").empty())
             set("suppress_hyperlinks", "1");
 
+        if (get("focus_platter_on_mouse").empty())
+            set("focus_platter_on_mouse", "1");
+
         if (get("custom_toolbar_size").empty())
             set("custom_toolbar_size", "100");
 
@@ -175,6 +412,9 @@ void AppConfig::set_defaults()
 
         if (get("auto_toolbar_size").empty())
             set("auto_toolbar_size", "100");
+ 
+       if (get("notify_release").empty())
+           set("notify_release", "all"); // or "none" or "release"
 
         if (get("auto_switch_preview").empty())
             set("auto_switch_preview", "2");
@@ -193,29 +433,33 @@ void AppConfig::set_defaults()
         if (get("default_action_on_select_preset").empty())
             set("default_action_on_select_preset", "none");     // , "transfer", "discard" or "save" 
 
-        if (get("default_action_preset_on_new_project").empty())
-            set("default_action_preset_on_new_project", "1");
-
         if (get("default_action_on_new_project").empty())
-            set("default_action_on_new_project", "1");
-		
+            set("default_action_on_new_project", "none");       // , "none" or 0
+
+        if (get("default_action_delete_all").empty())
+            set("default_action_delete_all", "1");
+
+        if (get("color_mapinulation_panel").empty())
+            set("color_mapinulation_panel", "0");
+
+        if (get("order_volumes").empty())
+            set("order_volumes", "1");
+
+        if (get("clear_undo_redo_stack_on_new_project").empty())
+            set("clear_undo_redo_stack_on_new_project", "1");
+
         if (get("use_rich_tooltip").empty())
-            set("use_rich_tooltip", 
-//#if __APPLE__
-			//"1"
-//#else
-			"0"
-//#endif
-			);
-    }
-#if ENABLE_CUSTOMIZABLE_FILES_ASSOCIATION_ON_WIN
-    else {
+            set("use_rich_tooltip", "0");
+
+        if (get("hide_slice_tooltip").empty())
+            set("hide_slice_tooltip", "0");
+
+	} else {
 #ifdef _WIN32
         if (get("associate_gcode").empty())
             set("associate_gcode", "0");
 #endif // _WIN32
     }
-#endif // ENABLE_CUSTOMIZABLE_FILES_ASSOCIATION_ON_WIN
 
     if (get("seq_top_layer_only").empty())
         set("seq_top_layer_only", "1");
@@ -232,18 +476,36 @@ void AppConfig::set_defaults()
     if (get("reverse_mouse_wheel_zoom").empty())
         set("reverse_mouse_wheel_zoom", "0");
 
+    if (get("search_category").empty())
+        set("search_category", "1");
+    if (get("search_english").empty())
+        set("search_english", "0");
+    if (get("search_exact").empty())
+        set("search_exact", "0");
+    if (get("search_all_mode").empty())
+        set("search_all_mode", "1");
+
     if (get("show_splash_screen").empty())
         set("show_splash_screen", "1");
 
-    if (get("show_splash_screen_random").empty())
-        set("show_splash_screen_random", "0");
+    if (get("show_splash_screen").empty())
+        set("show_splash_screen", "1");
+
+    if (get("restore_win_position").empty())
+        set("restore_win_position", "1");       // allowed values - "1", "0", "crashed_at_..."
+
+    if (get("show_hints").empty())
+        set("show_hints", "0");
+
+    if (get("allow_ip_resolve").empty())
+        set("allow_ip_resolve", "1");
 
     {
 
         //try to load splashscreen from ui file
         std::map<std::string, std::string> key2splashscreen = {{"splash_screen_editor", "benchy-splashscreen.jpg"}, {"splash_screen_gcodeviewer", "prusa-gcodepreview.jpg"} };
         boost::property_tree::ptree tree_splashscreen;
-        boost::filesystem::path path_colors = boost::filesystem::path(resources_dir()) / "ui_layout" / "colors.ini";
+        boost::filesystem::path path_colors = boost::filesystem::path(layout_config_path()) / "colors.ini";
         try {
             boost::nowide::ifstream ifs;
             ifs.imbue(boost::locale::generator()("en_US.UTF-8"));
@@ -261,19 +523,75 @@ void AppConfig::set_defaults()
         catch (const std::runtime_error& err) {
             trace(1, (std::string("Failed loading the splashscreen file. Reason: ") + err.what(), path_colors.string()).c_str());
         }
+        m_default_splashscreen = { key2splashscreen["splash_screen_editor"] , key2splashscreen["splash_screen_gcodeviewer"] };
+
         if (get("splash_screen_editor").empty())
-            set("splash_screen_editor", key2splashscreen["splash_screen_editor"]);
+            set("splash_screen_editor", "default");
 
         if (get("splash_screen_gcodeviewer").empty())
-            set("splash_screen_gcodeviewer", key2splashscreen["splash_screen_gcodeviewer"]);
+            set("splash_screen_gcodeviewer", "default");
+
+        if (!get("show_splash_screen_random").empty() && get("show_splash_screen_random") == "1") {
+            set("splash_screen_editor", "random");
+            set("show_splash_screen_random", "0");
+        }
     }
 
-#if ENABLE_CTRL_M_ON_WINDOWS
 #ifdef _WIN32
     if (get("use_legacy_3DConnexion").empty())
         set("use_legacy_3DConnexion", "0");
+
+    if (get("dark_color_mode").empty())
+        set("dark_color_mode", "0");
+
+    if (get("sys_menu_enabled").empty())
+        set("sys_menu_enabled", "1");
 #endif // _WIN32
-#endif // ENABLE_CTRL_M_ON_WINDOWS
+
+    //tags
+    boost::property_tree::ptree tree_colors;
+    boost::filesystem::path path_colors = layout_config_path() / "colors.ini";
+    try {
+        boost::nowide::ifstream ifs;
+        ifs.imbue(boost::locale::generator()("en_US.UTF-8"));
+        ifs.open(path_colors.string());
+        boost::property_tree::read_ini(ifs, tree_colors);
+
+        for (const auto& it : tree_colors) {
+            if (boost::starts_with(it.first, "Tag_")) {
+                std::string color_code = tree_colors.get<std::string>(it.first);
+                if (!color_code.empty()) {
+                    std::string tag = it.first.substr(4);
+                    color_code = (color_code[0] == '#' ? color_code : ("#" + color_code));
+
+                    // get/set into ConfigOptionDef
+                    auto it = ConfigOptionDef::names_2_tag_mode.find(tag);
+                    if (it == ConfigOptionDef::names_2_tag_mode.end()) {
+                        if (ConfigOptionDef::names_2_tag_mode.size() > 62) { //full
+                            continue;
+                        }
+                        ConfigOptionDef::names_2_tag_mode[tag] = (ConfigOptionMode)(((uint64_t)1) << ConfigOptionDef::names_2_tag_mode.size());
+                        it = ConfigOptionDef::names_2_tag_mode.find(tag);
+                    }
+                    m_tags.emplace_back(tag, tag, it->second, color_code);
+                    if (tag == "Simple")
+                        m_tags.back().description = L("Simple View Mode");
+                    if (tag == "Advanced")
+                        m_tags.back().description = L("Advanced View Mode");
+                    if (tag == "Expert")
+                        m_tags.back().description = L("Expert View Mode");
+                }
+            }
+        }
+    }
+    catch (const std::ifstream::failure& err) {
+        trace(1, (std::string("The color file cannot be loaded. Reason: ") + err.what(), path_colors.string()).c_str());
+    }
+    catch (const std::runtime_error& err) {
+        trace(1, (std::string("Failed loading the color file. Reason: ") + err.what(), path_colors.string()).c_str());
+    }
+
+
 
     // Remove legacy window positions/sizes
     erase("", "main_frame_maximized");
@@ -284,8 +602,134 @@ void AppConfig::set_defaults()
     erase("", "object_settings_size");
 }
 
+void AppConfig::init_ui_layout() {
+    boost::filesystem::path resources_dir_path = boost::filesystem::path(resources_dir()) / "ui_layout";
+    if (!boost::filesystem::is_directory(resources_dir_path)) {
+        //Error
+        throw new RuntimeError("error, can't find datadir '" + resources_dir_path.string() + "'");
+    }
+
+    auto get_versions = [](boost::filesystem::path& root_path, std::map<std::string, LayoutEntry>& name_2_version_description_path) {
+
+        for (boost::filesystem::directory_entry& entry : boost::filesystem::directory_iterator(root_path)) {
+            if (boost::filesystem::is_directory(entry.path())) {
+                boost::filesystem::path version_path = entry.path() / "version.ini";
+                if (boost::filesystem::is_regular_file(version_path)) {
+                    try {
+                        boost::property_tree::ptree tree_ini;
+                        boost::nowide::ifstream ifs;
+                        ifs.imbue(boost::locale::generator()("en_US.UTF-8"));
+                        ifs.open(version_path.string());
+                        boost::property_tree::read_ini(ifs, tree_ini);
+                        std::string name = tree_ini.get<std::string>("name");
+                        Semver version = Semver::parse(tree_ini.get<std::string>("version")).get();
+                        std::string description = tree_ini.get<std::string>("description");
+                        name_2_version_description_path[name] = LayoutEntry(name, description, entry.path(), version);
+                    }
+                    catch (const std::ifstream::failure& err) {
+                        trace(1, (std::string("The layout file " + version_path.string() + " cannot be loaded. Reason: ") + err.what()).c_str());
+                    }
+                    catch (const std::runtime_error& err) {
+                        trace(1, (std::string("Failed loading the " + version_path.string() + " file. Reason: ") + err.what()).c_str());
+                    }
+                }
+            }
+        }
+    };
+
+    //init
+    m_ui_layout.clear();
+
+    //get all boost::filesystem::path(resources_dir()) / "ui_layout" / XXX / "version.ini"
+    std::map<std::string, LayoutEntry> resources_map;
+    get_versions(resources_dir_path, resources_map);
+
+    //get all boost::filesystem::path(Slic3r::data_dir()) / "ui_layout" / XXX / "version.ini"
+    std::map<std::string, LayoutEntry> datadir_map;
+    boost::filesystem::path data_dir_path = boost::filesystem::path(Slic3r::data_dir()) / "ui_layout";
+    if (!boost::filesystem::is_directory(data_dir_path)) {
+        //note: called before the data_dir() is created
+        boost::filesystem::create_directories(data_dir_path);
+    } else {
+        get_versions(data_dir_path, datadir_map);
+    }
+
+
+    //copy all resources that aren't in datadir or newer
+    std::string current_name = get("ui_layout");
+    bool find_current = false;
+    std::string error_message;
+    for (const auto& layout : resources_map) {
+        auto it_datadir_layout = datadir_map.find(layout.first);
+        if (it_datadir_layout != datadir_map.end()) {
+            // compare version
+            if (it_datadir_layout->second.version < layout.second.version) {
+                //erase and copy
+                for (boost::filesystem::directory_entry& file : boost::filesystem::directory_iterator(it_datadir_layout->second.path)) {
+                    boost::filesystem::remove_all(file.path());
+                }
+                for (boost::filesystem::directory_entry& file : boost::filesystem::directory_iterator(layout.second.path)) {
+                    if (copy_file_inner(file.path(), it_datadir_layout->second.path / file.path().filename(), error_message))
+                        throw FileIOError(error_message);
+                }
+                //update for saving
+                it_datadir_layout->second.version = layout.second.version;
+                it_datadir_layout->second.description = layout.second.description;
+            } else if (it_datadir_layout->second.version == layout.second.version) {
+                //if same verison, only erase files more recent
+                //this is useful when there is many rapid changes, to test modifications.
+                for (boost::filesystem::directory_entry& resources_file : boost::filesystem::directory_iterator(layout.second.path)) {
+                    boost::filesystem::path datadir_path = it_datadir_layout->second.path / resources_file.path().filename();
+                    std::time_t resources_last_mod = boost::filesystem::last_write_time(resources_file.path());
+                    std::time_t datadir_last_mod = boost::filesystem::last_write_time(datadir_path);
+                    if (datadir_last_mod < resources_last_mod) {
+                        boost::filesystem::remove_all(datadir_path);
+                        if (copy_file_inner(resources_file.path(), datadir_path, error_message))
+                            throw FileIOError(error_message);
+                    }
+                }
+
+            }
+        } else {
+            // Doesn't exists, copy
+            boost::filesystem::create_directory(data_dir_path / layout.second.path.filename());
+            for (boost::filesystem::directory_entry& file : boost::filesystem::directory_iterator(layout.second.path)) {
+                if (copy_file_inner(file.path(), data_dir_path / layout.second.path.filename() / file.path().filename(), error_message))
+                    throw FileIOError(error_message);
+            }
+            //update for saving
+            datadir_map[layout.first] = layout.second;
+            datadir_map[layout.first].path = data_dir_path / layout.second.path.filename();
+        }
+    }
+
+    //save installed
+    for (const auto& layout : datadir_map) {
+        m_ui_layout.push_back(layout.second);
+        if (layout.first == current_name)
+            find_current = true;
+    }
+
+    //set ui_layout to a default if not set
+    if (current_name.empty() || !find_current) {
+        auto default_layout = datadir_map.find("Standard");
+        if (default_layout == datadir_map.end()) {
+            default_layout = datadir_map.find("Default");
+        }
+        if (default_layout == datadir_map.end() && datadir_map.size() > 0) {
+            default_layout = datadir_map.begin();
+        }
+        if (default_layout != datadir_map.end()) {
+            set("ui_layout", default_layout->first);
+        } else {
+            throw new RuntimeError("Error, cannot find any layout for the gui.");
+        }
+    }
+
+}
+
 #ifdef WIN32
-static std::string appconfig_md5_hash_line(const std::string_view data)
+std::string AppConfig::appconfig_md5_hash_line(const std::string_view data)
 {
     //FIXME replace the two following includes with <boost/md5.hpp> after it becomes mainstream.
     // return boost::md5(data).hex_str_value();
@@ -306,7 +750,7 @@ static std::string appconfig_md5_hash_line(const std::string_view data)
 };
 
 // Assume that the last line with the comment inside the config file contains a checksum and that the user didn't modify the config file.
-static bool verify_config_file_checksum(boost::nowide::ifstream &ifs)
+bool AppConfig::verify_config_file_checksum(boost::nowide::ifstream &ifs)
 {
     auto read_whole_config_file = [&ifs]() -> std::string {
         std::stringstream ss;
@@ -330,8 +774,10 @@ static bool verify_config_file_checksum(boost::nowide::ifstream &ifs)
 }
 #endif
 
-std::string AppConfig::load()
+std::string AppConfig::load(const std::string &path)
 {
+    this->reset();
+
     // 1) Read the complete config file into a boost::property_tree.
     namespace pt = boost::property_tree;
     pt::ptree tree;
@@ -339,11 +785,11 @@ std::string AppConfig::load()
     bool                    recovered = false;
 
     try {
-        ifs.open(AppConfig::config_path());
+        ifs.open(path);
 #ifdef WIN32
         // Verify the checksum of the config file without taking just for debugging purpose.
         if (!verify_config_file_checksum(ifs))
-            BOOST_LOG_TRIVIAL(info) << "The configuration file " << AppConfig::config_path() <<
+            BOOST_LOG_TRIVIAL(info) << "The configuration file " << path <<
             " has a wrong MD5 checksum or the checksum is missing. This may indicate a file corruption or a harmless user edit.";
 
         ifs.seekg(0, boost::nowide::ifstream::beg);
@@ -353,45 +799,45 @@ std::string AppConfig::load()
 #ifdef WIN32
         // The configuration file is corrupted, try replacing it with the backup configuration.
         ifs.close();
-        std::string backup_path = (boost::format("%1%.bak") % AppConfig::config_path()).str();
+        std::string backup_path = (boost::format("%1%.bak") % path).str();
         if (boost::filesystem::exists(backup_path)) {
             // Compute checksum of the configuration backup file and try to load configuration from it when the checksum is correct.
             boost::nowide::ifstream backup_ifs(backup_path);
             if (!verify_config_file_checksum(backup_ifs)) {
-                BOOST_LOG_TRIVIAL(error) << format("Both \"%1%\" and \"%2%\" are corrupted. It isn't possible to restore configuration from the backup.", AppConfig::config_path(), backup_path);
+                BOOST_LOG_TRIVIAL(error) << format("Both \"%1%\" and \"%2%\" are corrupted. It isn't possible to restore configuration from the backup.", path, backup_path);
                 backup_ifs.close();
                 boost::filesystem::remove(backup_path);
-            } else if (std::string error_message; copy_file(backup_path, AppConfig::config_path(), error_message, false) != SUCCESS) {
-                BOOST_LOG_TRIVIAL(error) << format("Configuration file \"%1%\" is corrupted. Failed to restore from backup \"%2%\": %3%", AppConfig::config_path(), backup_path, error_message);
+            } else if (std::string error_message; copy_file(backup_path, path, error_message, false) != SUCCESS) {
+                BOOST_LOG_TRIVIAL(error) << format("Configuration file \"%1%\" is corrupted. Failed to restore from backup \"%2%\": %3%", path, backup_path, error_message);
                 backup_ifs.close();
                 boost::filesystem::remove(backup_path);
             } else {
-                BOOST_LOG_TRIVIAL(info) << format("Configuration file \"%1%\" was corrupted. It has been succesfully restored from the backup \"%2%\".", AppConfig::config_path(), backup_path);
+                BOOST_LOG_TRIVIAL(info) << format("Configuration file \"%1%\" was corrupted. It has been succesfully restored from the backup \"%2%\".", path, backup_path);
                 // Try parse configuration file after restore from backup.
                 try {
-                    ifs.open(AppConfig::config_path());
+                    ifs.open(path);
                     pt::read_ini(ifs, tree);
                     recovered = true;
                 } catch (pt::ptree_error& ex) {
-                    BOOST_LOG_TRIVIAL(info) << format("Failed to parse configuration file \"%1%\" after it has been restored from backup: %2%", AppConfig::config_path(), ex.what());
+                    BOOST_LOG_TRIVIAL(info) << format("Failed to parse configuration file \"%1%\" after it has been restored from backup: %2%", path, ex.what());
                 }
             }
         } else
 #endif // WIN32
-            BOOST_LOG_TRIVIAL(info) << format("Failed to parse configuration file \"%1%\": %2%", AppConfig::config_path(), ex.what());
+            BOOST_LOG_TRIVIAL(info) << format("Failed to parse configuration file \"%1%\": %2%", path, ex.what());
         if (! recovered) {
             // Report the initial error of parsing PrusaSlicer.ini.
-        // Error while parsing config file. We'll customize the error message and rethrow to be displayed.
-        // ! But to avoid the use of _utf8 (related to use of wxWidgets) 
-        // we will rethrow this exception from the place of load() call, if returned value wouldn't be empty
-        /*
-        throw Slic3r::RuntimeError(
-        	_utf8(L("Error parsing " SLIC3R_APP_NAME " config file, it is probably corrupted. "
-                    "Try to manually delete the file to recover from the error. Your user profiles will not be affected.")) +
-        	"\n\n" + AppConfig::config_path() + "\n\n" + ex.what());
-        */
-        return ex.what();
-    }
+            // Error while parsing config file. We'll customize the error message and rethrow to be displayed.
+            // ! But to avoid the use of _utf8 (related to use of wxWidgets) 
+            // we will rethrow this exception from the place of load() call, if returned value wouldn't be empty
+            /*
+            throw Slic3r::RuntimeError(
+                _utf8(L("Error parsing " SLIC3R_APP_NAME " config file, it is probably corrupted. "
+                        "Try to manually delete the file to recover from the error. Your user profiles will not be affected.")) +
+                "\n\n" + AppConfig::config_path() + "\n\n" + ex.what());
+            */
+            return ex.what();
+        }
     }
 
     // 2) Parse the property_tree, extract the sections and key / value pairs.
@@ -454,6 +900,11 @@ std::string AppConfig::load()
     return "";
 }
 
+std::string AppConfig::load()
+{
+    return this->load(AppConfig::config_path());
+}
+
 void AppConfig::save()
 {
     {
@@ -469,6 +920,7 @@ void AppConfig::save()
     std::string path_pid = (boost::format("%1%.%2%") % path % get_current_pid()).str();
 
     std::stringstream config_ss;
+    set_header_generate_with_date(get("date_in_config_file") == "1");
     if (m_mode == EAppMode::Editor)
         config_ss << "# " << Slic3r::header_slic3r_generated() << std::endl;
     else
@@ -477,7 +929,7 @@ void AppConfig::save()
     for (const auto& kvp : m_storage[""])
         config_ss << kvp.first << " = " << kvp.second << std::endl;
     // Write the other categories.
-    for (const auto category : m_storage) {
+    for (const auto& category : m_storage) {
     	if (category.first.empty())
     		continue;
         config_ss << std::endl << "[" << category.first << "]" << std::endl;
@@ -513,7 +965,7 @@ void AppConfig::save()
     c << appconfig_md5_hash_line(config_str);
 #endif
     c.close();
-
+    
 #ifdef WIN32
     // Make a backup of the configuration file before copying it to the final destination.
     std::string error_message;
@@ -528,6 +980,9 @@ void AppConfig::save()
     // To cope with that, we already made a backup of the config on Windows.
     rename_file(path_pid, path);
     m_dirty = false;
+
+    // ensure some options are in sync
+    set_header_generate_with_date(get("date_in_config_file") == "1");
 }
 
 bool AppConfig::get_variant(const std::string &vendor, const std::string &model, const std::string &variant) const
@@ -607,7 +1062,8 @@ void AppConfig::set_recent_projects(const std::vector<std::string>& recent_proje
     }
 }
 
-void AppConfig::set_mouse_device(const std::string& name, double translation_speed, double translation_deadzone, float rotation_speed, float rotation_deadzone, double zoom_speed, bool swap_yz)
+void AppConfig::set_mouse_device(const std::string& name, double translation_speed, double translation_deadzone,
+                                 float rotation_speed, float rotation_deadzone, double zoom_speed, bool swap_yz)
 {
     std::string key = std::string("mouse_device:") + name;
     auto it = m_storage.find(key);
@@ -615,11 +1071,11 @@ void AppConfig::set_mouse_device(const std::string& name, double translation_spe
         it = m_storage.insert(std::map<std::string, std::map<std::string, std::string>>::value_type(key, std::map<std::string, std::string>())).first;
 
     it->second.clear();
-    it->second["translation_speed"] = std::to_string(translation_speed);
-    it->second["translation_deadzone"] = std::to_string(translation_deadzone);
-    it->second["rotation_speed"] = std::to_string(rotation_speed);
-    it->second["rotation_deadzone"] = std::to_string(rotation_deadzone);
-    it->second["zoom_speed"] = std::to_string(zoom_speed);
+    it->second["translation_speed"] = float_to_string_decimal_point(translation_speed);
+    it->second["translation_deadzone"] = float_to_string_decimal_point(translation_deadzone);
+    it->second["rotation_speed"] = float_to_string_decimal_point(rotation_speed);
+    it->second["rotation_deadzone"] = float_to_string_decimal_point(rotation_deadzone);
+    it->second["zoom_speed"] = float_to_string_decimal_point(zoom_speed);
     it->second["swap_yz"] = swap_yz ? "1" : "0";
 }
 
@@ -628,7 +1084,7 @@ std::vector<std::string> AppConfig::get_mouse_device_names() const
     static constexpr const char   *prefix     = "mouse_device:";
     static const size_t  prefix_len = strlen(prefix);
     std::vector<std::string> out;
-    for (const std::pair<std::string, std::map<std::string, std::string>>& key_value_pair : m_storage)
+    for (const auto& key_value_pair : m_storage)
         if (boost::starts_with(key_value_pair.first, prefix) && key_value_pair.first.size() > prefix_len)
             out.emplace_back(key_value_pair.first.substr(prefix_len));
     return out;
@@ -641,6 +1097,8 @@ void AppConfig::update_config_dir(const std::string &dir)
 
 void AppConfig::update_skein_dir(const std::string &dir)
 {
+    if (is_shapes_dir(dir))
+        return; // do not save "shapes gallery" directory
     this->set("recent", "skein_directory", dir);
 }
 /*
@@ -672,7 +1130,7 @@ std::string AppConfig::get_last_output_dir(const std::string& alt, const bool re
 		if (it2 != it->second.end() && it3 != it->second.end() && !it2->second.empty() && it3->second == "1")
 			return it2->second;
 	}
-	return alt;
+	return is_shapes_dir(alt) ? get_last_dir() : alt;
 }
 
 void AppConfig::update_last_output_dir(const std::string& dir, const bool removable)
@@ -702,6 +1160,47 @@ std::string AppConfig::config_path()
         (boost::filesystem::path(Slic3r::data_dir()) / (GCODEVIEWER_APP_KEY ".ini")).make_preferred().string();
 
     return path;
+}
+
+boost::filesystem::path AppConfig::layout_config_path()
+{
+    return get_ui_layout().path.make_preferred();
+}
+AppConfig::LayoutEntry AppConfig::get_ui_layout()
+{
+    std::string layout_name = get("ui_layout");
+    for (const AppConfig::LayoutEntry& layout : get_ui_layouts()) {
+        if (layout_name == layout.name)
+            return layout;
+    }
+    if (!get_ui_layouts().empty())
+        return get_ui_layouts().front();
+    throw new RuntimeError("Error, no setting ui_layout.");
+}
+
+std::string AppConfig::splashscreen(bool is_editor) {
+
+    std::string file_name = is_editor
+        ? get("splash_screen_editor")
+        : get("splash_screen_gcodeviewer");
+
+    if (file_name == "default") {
+        file_name = is_editor ? m_default_splashscreen.first : m_default_splashscreen.second;
+    }
+    if (file_name == "icon") {
+        file_name = "";
+    }
+    
+    if (file_name == "random") {
+        std::vector<std::string> names;
+        //get all images in the spashscreen dir
+        for (const boost::filesystem::directory_entry& dir_entry : boost::filesystem::directory_iterator(boost::filesystem::path(Slic3r::resources_dir()) / "splashscreen"))
+            if (dir_entry.path().has_extension() && std::set<std::string>{ ".jpg", ".JPG", ".jpeg" }.count(dir_entry.path().extension().string()) > 0)
+                names.push_back(dir_entry.path().filename().string());
+        file_name = names[rand() % names.size()];
+    }
+
+    return file_name;
 }
 
 std::string AppConfig::version_check_url() const

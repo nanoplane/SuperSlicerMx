@@ -68,7 +68,7 @@ void update_maximum(std::atomic<T>& maximum_value, T const& value) noexcept
 
 void Mouse3DController::State::append_translation(const Vec3d& translation, size_t input_queue_max_size)
 {
-	std::scoped_lock lock(m_input_queue_mutex);
+    std::scoped_lock<std::mutex> lock(m_input_queue_mutex);
     while (m_input_queue.size() >= input_queue_max_size)
         m_input_queue.pop_front();
     m_input_queue.emplace_back(QueueItem::translation(translation));
@@ -79,7 +79,7 @@ void Mouse3DController::State::append_translation(const Vec3d& translation, size
 
 void Mouse3DController::State::append_rotation(const Vec3f& rotation, size_t input_queue_max_size)
 {
-	std::scoped_lock lock(m_input_queue_mutex);
+    std::scoped_lock<std::mutex> lock(m_input_queue_mutex);
     while (m_input_queue.size() >= input_queue_max_size)
         m_input_queue.pop_front();
     m_input_queue.emplace_back(QueueItem::rotation(rotation.cast<double>()));
@@ -94,7 +94,7 @@ void Mouse3DController::State::append_rotation(const Vec3f& rotation, size_t inp
 
 void Mouse3DController::State::append_button(unsigned int id, size_t /* input_queue_max_size */)
 {
-	std::scoped_lock lock(m_input_queue_mutex);
+    std::scoped_lock<std::mutex> lock(m_input_queue_mutex);
     m_input_queue.emplace_back(QueueItem::buttons(id));
 #if ENABLE_3DCONNEXION_DEVICES_DEBUG_OUTPUT
     update_maximum(input_queue_max_size_achieved, m_input_queue.size());
@@ -102,7 +102,6 @@ void Mouse3DController::State::append_button(unsigned int id, size_t /* input_qu
 }
 
 #ifdef _WIN32
-#if ENABLE_CTRL_M_ON_WINDOWS
 static std::string format_device_string(int vid, int pid)
 {
     std::string ret;
@@ -259,7 +258,6 @@ static std::string detect_attached_device()
 
     return ret;
 }
-#endif // ENABLE_CTRL_M_ON_WINDOWS
 
 // Called by Win32 HID enumeration callback.
 void Mouse3DController::device_attached(const std::string &device)
@@ -276,45 +274,41 @@ void Mouse3DController::device_attached(const std::string &device)
 			// Never mind, enumeration will be performed until connected.
 		    m_wakeup = true;
 			m_stop_condition.notify_all();
-#if ENABLE_CTRL_M_ON_WINDOWS
             m_device_str = format_device_string(vid, pid);
             if (auto it_params = m_params_by_device.find(m_device_str); it_params != m_params_by_device.end()) {
-                std::scoped_lock lock(m_params_ui_mutex);
+                std::scoped_lock<std::mutex> lock(m_params_ui_mutex);
                 m_params = m_params_ui = it_params->second;
             }
             else
                 m_params_by_device[format_device_string(vid, pid)] = Params();
             m_connected = true;
-#endif // ENABLE_CTRL_M_ON_WINDOWS
         }
 	}
 }
 
-#if ENABLE_CTRL_M_ON_WINDOWS
 void Mouse3DController::device_detached(const std::string& device)
 {
     int vid = 0;
     int pid = 0;
     if (sscanf(device.c_str(), "\\\\?\\HID#VID_%x&PID_%x&", &vid, &pid) == 2) {
         if (std::find(_3DCONNEXION_VENDORS.begin(), _3DCONNEXION_VENDORS.end(), vid) != _3DCONNEXION_VENDORS.end()) {
-            std::scoped_lock lock(m_params_ui_mutex);
+            std::scoped_lock<std::mutex> lock(m_params_ui_mutex);
             m_params_by_device[format_device_string(vid, pid)] = m_params_ui;
         }
     }
     m_device_str = "";
     m_connected = false;
 }
-#endif // ENABLE_CTRL_M_ON_WINDOWS
 
 // Filter out mouse scroll events produced by the 3DConnexion driver.
 bool Mouse3DController::State::process_mouse_wheel()
 {
-	std::scoped_lock lock(m_input_queue_mutex);
-	if (m_mouse_wheel_counter == 0)
-    	// No 3DConnexion rotation has been captured since the last mouse scroll event.
+    std::scoped_lock<std::mutex> lock(m_input_queue_mutex);
+    if (m_mouse_wheel_counter == 0)
+        // No 3DConnexion rotation has been captured since the last mouse scroll event.
         return false;
     if (std::find_if(m_input_queue.begin(), m_input_queue.end(), [](const QueueItem &item){ return item.is_rotation(); }) != m_input_queue.end()) {
-    	// There is a rotation stored in the queue. Suppress one mouse scroll event.
+        // There is a rotation stored in the queue. Suppress one mouse scroll event.
         -- m_mouse_wheel_counter;
         return true;
     }
@@ -331,7 +325,7 @@ bool Mouse3DController::State::apply(const Mouse3DController::Params &params, Ca
     std::deque<QueueItem> input_queue;
     {
     	// Atomically move m_input_queue to input_queue.
-    	std::scoped_lock lock(m_input_queue_mutex);
+    	std::scoped_lock<std::mutex> lock(m_input_queue_mutex);
     	input_queue = std::move(m_input_queue);
         m_input_queue.clear();
     }
@@ -383,7 +377,7 @@ void Mouse3DController::load_config(const AppConfig &appconfig)
         appconfig.get_mouse_device_swap_yz(device_name, swap_yz);
         // clamp to valid values
 	    Params params;
-	    params.translation.scale = Params::DefaultTranslationScale * std::clamp(translation_speed, 0.1, 10.0);
+	    params.translation.scale = Params::DefaultTranslationScale * std::clamp(translation_speed, Params::MinTranslationScale, Params::MaxTranslationScale);
 	    params.translation.deadzone = std::clamp(translation_deadzone, 0.0, Params::MaxTranslationDeadzone);
 	    params.rotation.scale = Params::DefaultRotationScale * std::clamp(rotation_speed, 0.1f, 10.0f);
 	    params.rotation.deadzone = std::clamp(rotation_deadzone, 0.0f, Params::MaxRotationDeadzone);
@@ -399,7 +393,7 @@ void Mouse3DController::save_config(AppConfig &appconfig) const
 	// We do not synchronize m_params_by_device with the background thread explicitely 
 	// as there should be a full memory barrier executed once the background thread is stopped.
 
-	for (const std::pair<std::string, Params> &key_value_pair : m_params_by_device) {
+    for (const auto &key_value_pair : m_params_by_device) {
 		const std::string &device_name = key_value_pair.first;
 		const Params      &params      = key_value_pair.second;
 	    // Store current device parameters into the config
@@ -417,17 +411,15 @@ bool Mouse3DController::apply(Camera& camera)
         m_settings_dialog_closed_by_user = false;
     }
 
-#if ENABLE_CTRL_M_ON_WINDOWS
 #ifdef _WIN32
     {
-        std::scoped_lock lock(m_params_ui_mutex);
+        std::scoped_lock<std::mutex> lock(m_params_ui_mutex);
         if (m_params_ui_changed) {
             m_params = m_params_ui;
             m_params_ui_changed = false;
         }
     }
 #endif // _WIN32
-#endif // ENABLE_CTRL_M_ON_WINDOWS
 
     return m_state.apply(m_params, camera);
 }
@@ -449,7 +441,7 @@ void Mouse3DController::render_settings_dialog(GLCanvas3D& canvas) const
     Params params_copy;
     bool   params_changed = false;
     {
-    	std::scoped_lock lock(m_params_ui_mutex);
+    	std::scoped_lock<std::mutex> lock(m_params_ui_mutex);
     	params_copy = m_params_ui;
     }
 
@@ -478,9 +470,9 @@ void Mouse3DController::render_settings_dialog(GLCanvas3D& canvas) const
             ImGui::Separator();
             imgui.text_colored(color, _L("Speed:"));
 
-            float translation_scale = (float)params_copy.translation.scale / Params::DefaultTranslationScale;
-            if (imgui.slider_float(_L("Translation") + "##1", &translation_scale, 0.1f, 10.0f, "%.1f")) {
-            	params_copy.translation.scale = Params::DefaultTranslationScale * (double)translation_scale;
+            float translation_scale = float(params_copy.translation.scale) / float(Params::DefaultTranslationScale);
+            if (imgui.slider_float(_L("Translation"), &translation_scale, float(Params::MinTranslationScale), float(Params::MaxTranslationScale), "%.1f")) {
+                params_copy.translation.scale = Params::DefaultTranslationScale * double(translation_scale);
             	params_changed = true;
             }
 
@@ -527,13 +519,13 @@ void Mouse3DController::render_settings_dialog(GLCanvas3D& canvas) const
             imgui.text_colored(color, "Vectors:");
             Vec3f translation = m_state.get_first_vector_of_type(State::QueueItem::TranslationType).cast<float>();
             Vec3f rotation = m_state.get_first_vector_of_type(State::QueueItem::RotationType).cast<float>();
-            ImGui::InputFloat3("Translation##3", translation.data(), "%.3f", ImGuiInputTextFlags_ReadOnly);
+            ImGui::InputFloat3("Translation##2", translation.data(), "%.3f", ImGuiInputTextFlags_ReadOnly);
             ImGui::InputFloat3("Rotation##3", rotation.data(), "%.3f", ImGuiInputTextFlags_ReadOnly);
 
             imgui.text_colored(color, "Queue size:");
 
             int input_queue_size_current[2] = { int(m_state.input_queue_size_current()), int(m_state.input_queue_max_size_achieved) };
-            ImGui::InputInt2("Current##4", input_queue_size_current, ImGuiInputTextFlags_ReadOnly);
+            ImGui::InputInt2("Current", input_queue_size_current, ImGuiInputTextFlags_ReadOnly);
 
             int input_queue_size_param = int(params_copy.input_queue_max_size);
             if (ImGui::InputInt("Max size", &input_queue_size_param, 1, 1, ImGuiInputTextFlags_ReadOnly)) {
@@ -567,7 +559,7 @@ void Mouse3DController::render_settings_dialog(GLCanvas3D& canvas) const
 
     if (params_changed) {
         // Synchronize front end parameters to back end.
-    	std::scoped_lock lock(m_params_ui_mutex);
+    	std::scoped_lock<std::mutex> lock(m_params_ui_mutex);
         auto pthis = const_cast<Mouse3DController*>(this);
 #if ENABLE_3DCONNEXION_DEVICES_DEBUG_OUTPUT
         if (params_copy.input_queue_max_size != params_copy.input_queue_max_size)
@@ -588,7 +580,7 @@ void Mouse3DController::connected(std::string device_name)
 	m_device_str = device_name;
     // Copy the parameters for m_device_str into the current parameters.
     if (auto it_params = m_params_by_device.find(m_device_str); it_params != m_params_by_device.end()) {
-    	std::scoped_lock lock(m_params_ui_mutex);
+    	std::scoped_lock<std::mutex> lock(m_params_ui_mutex);
     	m_params = m_params_ui = it_params->second;
     }
     m_connected = true;
@@ -599,7 +591,7 @@ void Mouse3DController::disconnected()
     // Copy the current parameters for m_device_str into the parameter database.
     assert(m_connected == ! m_device_str.empty());
     if (m_connected) {
-        std::scoped_lock lock(m_params_ui_mutex);
+        std::scoped_lock<std::mutex> lock(m_params_ui_mutex);
         m_params_by_device[m_device_str] = m_params_ui;
 	    m_device_str.clear();
 	    m_connected = false;
@@ -623,7 +615,7 @@ bool Mouse3DController::handle_input(const DataPacketAxis& packet)
     {
     	// Synchronize parameters between the UI thread and the background thread.
     	//FIXME is this necessary on OSX? Are these notifications triggered from the main thread or from a worker thread?
-    	std::scoped_lock lock(m_params_ui_mutex);
+    	std::scoped_lock<std::mutex> lock(m_params_ui_mutex);
     	if (m_params_ui_changed) {
     		m_params = m_params_ui;
     		m_params_ui_changed = false;
@@ -663,7 +655,6 @@ bool Mouse3DController::handle_input(const DataPacketAxis& packet)
 // Initialize the application.
 void Mouse3DController::init()
 {
-#if ENABLE_CTRL_M_ON_WINDOWS
 #ifdef _WIN32
     m_device_str = detect_attached_device();
     if (!m_device_str.empty()) {
@@ -672,7 +663,6 @@ void Mouse3DController::init()
             m_params = m_params_ui = it_params->second;
     }
 #endif // _WIN32
-#endif // ENABLE_CTRL_M_ON_WINDOWS
 
 	assert(! m_thread.joinable());
     if (! m_thread.joinable()) {
@@ -700,12 +690,10 @@ void Mouse3DController::shutdown()
         m_stop = false;
 	}
 
-#if ENABLE_CTRL_M_ON_WINDOWS
 #ifdef _WIN32
     if (!m_device_str.empty())
         m_params_by_device[m_device_str] = m_params_ui;
 #endif // _WIN32
-#endif // ENABLE_CTRL_M_ON_WINDOWS
 }
 
 // Main routine of the worker thread.
@@ -760,7 +748,7 @@ void Mouse3DController::run()
 
     for (;;) {
         {
-        	std::scoped_lock lock(m_params_ui_mutex);
+        	std::scoped_lock<std::mutex> lock(m_params_ui_mutex);
         	if (m_stop)
         		break;
         	if (m_params_ui_changed) {
@@ -1026,7 +1014,7 @@ bool Mouse3DController::connect_device()
 #endif // ENABLE_3DCONNEXION_DEVICES_DEBUG_OUTPUT
         // Copy the parameters for m_device_str into the current parameters.
         if (auto it_params = m_params_by_device.find(m_device_str); it_params != m_params_by_device.end()) {
-	    	std::scoped_lock lock(m_params_ui_mutex);
+	    	std::scoped_lock<std::mutex> lock(m_params_ui_mutex);
 	    	m_params = m_params_ui = it_params->second;
 	    }
     }
@@ -1051,7 +1039,7 @@ void Mouse3DController::disconnect_device()
 	    BOOST_LOG_TRIVIAL(info) << "Disconnected device: " << m_device_str;
         // Copy the current parameters for m_device_str into the parameter database.
         {
-	        std::scoped_lock lock(m_params_ui_mutex);
+	        std::scoped_lock<std::mutex> lock(m_params_ui_mutex);
 	        m_params_by_device[m_device_str] = m_params_ui;
 	    }
 	    m_device_str.clear();
@@ -1094,12 +1082,10 @@ void Mouse3DController::collect_input()
                 case SPNAV_EVENT_MOTION: {
                     Vec3d translation(-convert_spnav_input(ev.motion.x), convert_spnav_input(ev.motion.y), -convert_spnav_input(ev.motion.z));
                     if (!translation.isApprox(Vec3d::Zero())) {
-std::cout << "Motion: X: " << ev.motion.x << ", Y: " << ev.motion.y << ", Z: " << ev.motion.z << std::endl;
                         m_state.append_translation(translation, m_params.input_queue_max_size);
                     }
                     Vec3f rotation(convert_spnav_input(ev.motion.rx), convert_spnav_input(ev.motion.ry), -convert_spnav_input(ev.motion.rz));
                     if (!rotation.isApprox(Vec3f::Zero())) {
-std::cout << "Motion: rX: " << ev.motion.rx << ", rY: " << ev.motion.ry << ", rZ: " << ev.motion.rz << std::endl;
                         m_state.append_rotation(rotation, m_params.input_queue_max_size);
                     }
                     break;
@@ -1136,9 +1122,7 @@ bool Mouse3DController::handle_raw_input_win32(const unsigned char *data, const 
         DataPacketRaw packet;
     	memcpy(packet.data(), data, packet_length);
         handle_packet(packet, packet_length, m_params, m_state);
-#if ENABLE_CTRL_M_ON_WINDOWS
         m_connected = true;
-#endif // ENABLE_CTRL_M_ON_WINDOWS
     }
 
     return true;

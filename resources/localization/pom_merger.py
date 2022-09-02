@@ -362,9 +362,15 @@ def outputUntranslated(data_to_translate, file_path_out):
 			if not dataline.msgstr.strip() and dataline.msgid and len(getTranslation(dataline).strip()) == 0:
 				sorted_lines.append(dataline);
 		sorted_lines.sort(key=lambda x:x.msgid.lower())
-
+		
+		nb_iter = 0;
 		# output bits that are empty
 		for dataline in sorted_lines:
+			if nb_iter%100 == 99:
+				print('.');
+			else:
+				print('.', end = '');
+			nb_iter += 1;
 			file_out_stream.write(dataline.header_comment);
 			file_out_stream.write("\n");
 			# get translation that are near enough to be copy-pasted by humans.
@@ -448,7 +454,9 @@ def outputDatabase(file_path_out):
 		
 		for msgid in datastore:
 			dataline = datastore[msgid];
-			file_out_stream.write(dataline.header_comment);
+			#don't store commenta nymore. there is none is the slic3r.po anyway
+			#file_out_stream.write(dataline.header_comment);
+			#note that the header_comment contains the \n already so comment this line is you don't comment header_comment
 			file_out_stream.write("\n");
 			file_out_stream.write(dataline.raw_msgid);
 			file_out_stream.write("\n");

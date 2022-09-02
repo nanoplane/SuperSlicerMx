@@ -14,10 +14,17 @@
 #include <wx/numformatter.h>
 #include <wx/tooltip.h>
 #include <wx/notebook.h>
+#include <wx/listbook.h>
 #include <wx/richtooltip.h>
+#ifdef __WXGTK2__
+#include <wx/tglbtn.h>
+#endif
 #include <wx/tokenzr.h>
 #include <boost/algorithm/string/predicate.hpp>
+#include <boost/log/trivial.hpp>
 #include "OG_CustomCtrl.hpp"
+#include "MsgDialog.hpp"
+#include "BitmapComboBox.hpp"
 
 #ifdef __WXOSX__
 #define wxOSX true
@@ -38,12 +45,13 @@ wxString double_to_string(double const value, const int max_precision /*= 6*/)
 	// with the exception that here one sets the decimal separator explicitely to dot.
     // If number is in scientific format, trailing zeroes belong to the exponent and cannot be removed.
     if (s.find_first_of("eE") == wxString::npos) {
-	    const size_t posDecSep = s.find(".");
+        char dec_sep = is_decimal_separator_point() ? '.' : ',';
+        const size_t posDecSep = s.find(dec_sep);
 	    // No decimal point => removing trailing zeroes irrelevant for integer number.
 	    if (posDecSep != wxString::npos) {
 		    // Find the last character to keep.
 		    size_t posLastNonZero = s.find_last_not_of("0");
-		    // If it's the decimal separator itself, don't keep it neither.
+            // If it's the decimal separator itself, don't keep it either.
 		    if (posLastNonZero == posDecSep)
 		        -- posLastNonZero;
 		    s.erase(posLastNonZero + 1);
@@ -73,8 +81,6 @@ Field::~Field()
 {
 	if (m_on_kill_focus)
 		m_on_kill_focus = nullptr;
-	if (m_on_set_focus)
-		m_on_set_focus = nullptr;
 	if (m_on_change)
 		m_on_change = nullptr;
 	if (m_back_to_initial_value)
@@ -97,8 +103,8 @@ void Field::PostInitialize()
 	case coPercents:
 	case coFloats:
 	case coFloatsOrPercents:
-	case coStrings:	
-	case coBools:		
+	case coStrings:
+	case coBools:
 	case coPoints:
 	case coInts: {
 		auto tag_pos = m_opt_id.find("#");
@@ -120,7 +126,7 @@ void Field::PostInitialize()
 	// So, like a workaround check wxEVT_KEY_UP event for the Filed and switch between tabs if Ctrl+(1-6) was pressed 
 	if (getWindow())
 		getWindow()->Bind(wxEVT_KEY_UP, [](wxKeyEvent& evt) {
-		    if ((evt.GetModifiers() & wxMOD_CONTROL) != 0 && (evt.GetModifiers() & wxMOD_ALT == 0)) {
+            if ((evt.GetModifiers() & wxMOD_CONTROL) != 0 && (evt.GetModifiers() & wxMOD_ALT) == 0) {
                 MainFrame::ETabType tab_id = MainFrame::ETabType::Any;
                 switch (evt.GetKeyCode()) {
                 case '1': { tab_id = MainFrame::ETabType::Plater3D; break; }
@@ -146,7 +152,7 @@ void Field::PostInitialize()
                         wxGetApp().tab_panel()->SetFocus();
                 }
 		    }
-			    
+
 		    evt.Skip();
 	    });
 }
@@ -159,24 +165,16 @@ int Field::def_width_thinner()	{ return 4; }
 void Field::on_kill_focus()
 {
 	// call the registered function if it is available
-    if (m_on_kill_focus!=nullptr) 
+    if (m_on_kill_focus!=nullptr)
         m_on_kill_focus(m_opt_id);
-}
-
-void Field::on_set_focus(wxEvent& event)
-{
-    // to allow the default behavior
-	event.Skip();
-	// call the registered function if it is available
-    if (m_on_set_focus!=nullptr) 
-        m_on_set_focus(m_opt_id);
 }
 
 void Field::on_change_field()
 {
 //       std::cerr << "calling Field::_on_change \n";
-    if (m_on_change != nullptr  && !m_disable_change_event)
+    if (m_on_change != nullptr && !m_disable_change_event) {
         m_on_change(m_opt_id, get_value());
+    }
 }
 
 void Field::on_back_to_initial_value()
@@ -305,7 +303,11 @@ void RichTooltipTimer::Notify() {
         wxWindowList tipWindow = m_current_window->GetChildren();
         this->m_current_rich_tooltip = tipWindow.GetLast()->GetData();
         this->m_current_rich_tooltip->SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_BACKGROUND));
+#ifdef _WIN32
+        this->m_current_rich_tooltip->SetForegroundColour(wxGetApp().get_label_clr_default());
+#else
         this->m_current_rich_tooltip->SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT));
+#endif /* _WIN32 */
         this->m_current_rich_tooltip->Bind(wxEVT_LEAVE_WINDOW, [this](wxMouseEvent& event) {
             this->m_is_rich_tooltip_ready = false;
             wxWindowList tipWindow = m_current_window->GetChildren();
@@ -332,17 +334,20 @@ bool Field::is_matched(const std::string& string, const std::string& pattern)
 
 static wxString na_value() { return _(L("N/A")); }
 
+//TODO move value verification on another methos that won't be called at each value.get()
 void Field::get_value_by_opt_type(wxString& str, const bool check_value/* = true*/)
 {
+    double val = 0;
 	switch (m_opt.type) {
 	case coInt:
 		m_value = wxAtoi(str);
+        val = wxAtoi(str);
 		break;
 	case coPercent:
 	case coPercents:
 	case coFloats:
 	case coFloat:{
-		if (m_opt.type == coPercent && !str.IsEmpty() &&  str.Last() == '%') 
+		if (m_opt.type == coPercent && !str.IsEmpty() &&  str.Last() == '%')
 			str.RemoveLast();
 		else if (!str.IsEmpty() && str.Last() == '%')
         {
@@ -357,16 +362,24 @@ void Field::get_value_by_opt_type(wxString& str, const bool check_value/* = true
 			m_value = double(m_opt.min);
 			break;
 		}
-		double val;
-		// Replace the first occurence of comma in decimal number.
-		str.Replace(",", ".", false);
-        if (str == ".")
+
+        bool is_na_value = m_opt.nullable && str == na_value();
+
+        const char dec_sep = is_decimal_separator_point() ? '.' : ',';
+        const char dec_sep_alt = dec_sep == '.' ? ',' : '.';
+        // Replace the first incorrect separator in decimal number, 
+        // if this value doesn't "N/A" value in some language
+        // see https://github.com/prusa3d/PrusaSlicer/issues/6921
+        if (!is_na_value && str.Replace(dec_sep_alt, dec_sep, false) != 0)
+            set_value(str, false);
+
+        if (str == dec_sep)
             val = 0.0;
         else
         {
-            if (m_opt.nullable && str == na_value())
+            if (is_na_value)
                 val = ConfigOptionFloatsNullable::nil_value();
-            else if (!str.ToCDouble(&val))
+            else if (!str.ToDouble(&val))
             {
                 if (!check_value) {
                     m_value.clear();
@@ -385,7 +398,8 @@ void Field::get_value_by_opt_type(wxString& str, const bool check_value/* = true
                     if (m_value.empty() || boost::any_cast<double>(m_value) != val) {
                         wxString msg_text = format_wxstr(_L("Input value is out of range\n"
                             "Are you sure that %s is a correct value and that you want to continue?"), str);
-                        wxMessageDialog dialog(m_parent, msg_text, _L("Parameter validation") + ": " + m_opt_id, wxICON_WARNING | wxYES | wxNO);
+//                        wxMessageDialog dialog(m_parent, msg_text, _L("Parameter validation") + ": " + m_opt_id, wxICON_WARNING | wxYES | wxNO);
+                        WarningDialog dialog(m_parent, msg_text, _L("Parameter validation") + ": " + m_opt_id, wxYES | wxNO);
                         if (dialog.ShowModal() == wxID_NO) {
                             if (m_value.empty()) {
                                 if (m_opt.min > val) val = m_opt.min;
@@ -416,9 +430,8 @@ void Field::get_value_by_opt_type(wxString& str, const bool check_value/* = true
         if (!str.IsEmpty()) {
             if ("infill_overlap" == m_opt_id && m_last_validated_value != str) {
                 bool bad = false;
-                double val = 0.;
                 if (str.Last() != '%') {
-                    if (str.ToCDouble(&val)) {
+                    if (str.ToDouble(&val)) {
                         const DynamicPrintConfig& printer_config = wxGetApp().preset_bundle->printers.get_edited_preset().config;
                             const std::vector<double>& nozzle_diameters = printer_config.option<ConfigOptionFloats>("nozzle_diameter")->values;
                             double nozzle_diameter = 0;
@@ -450,9 +463,11 @@ void Field::get_value_by_opt_type(wxString& str, const bool check_value/* = true
                 }
             }
             else if (str.Last() != '%') {
-                double val = 0.;
-                // Replace the first occurence of comma in decimal number.
-                str.Replace(",", ".", false);
+                const char dec_sep = is_decimal_separator_point() ? '.' : ',';
+                const char dec_sep_alt = dec_sep == '.' ? ',' : '.';
+                // Replace the first incorrect separator in decimal number.
+                if (str.Replace(dec_sep_alt, dec_sep, false) != 0)
+                    set_value(str, false);
 
                 // remove space and "mm" substring, if any exists
                 str.Replace(" ", "", true);
@@ -461,7 +476,7 @@ void Field::get_value_by_opt_type(wxString& str, const bool check_value/* = true
                 if (m_opt.nullable && str == na_value()) {
                     val = ConfigOptionFloatsNullable::nil_value();
                     str = "nan";
-                } else if (!str.ToCDouble(&val)) {
+                } else if (!str.ToDouble(&val)) {
                     if (!check_value) {
                         m_value.clear();
                         break;
@@ -480,9 +495,9 @@ void Field::get_value_by_opt_type(wxString& str, const bool check_value/* = true
                         show_error(m_parent, _(L("Input value is out of range")));
                         if (m_opt.min > val) val = m_opt.min;
                         set_value(double_to_string(val, m_opt.precision), true);
-                    } else if (m_value.empty() || std::string(str.ToUTF8().data()) != boost::any_cast<std::string>(m_value)) {
+                    } else if (m_value.empty() || into_u8(str) != boost::any_cast<std::string>(m_value)) {
                         bool not_ok = (m_opt.sidetext.rfind("mm/s") != std::string::npos && val > m_opt.max);
-                        if (!not_ok && m_opt.max_literal.value != 0) {
+                        if (!not_ok && m_opt.max_literal.value != 0 && val != 0) {
                             if (m_opt.max_literal.percent) {
                                 const DynamicPrintConfig& printer_config = wxGetApp().preset_bundle->printers.get_edited_preset().config;
                                 const std::vector<double>& nozzle_diameters = printer_config.option<ConfigOptionFloats>("nozzle_diameter")->values;
@@ -513,7 +528,7 @@ void Field::get_value_by_opt_type(wxString& str, const bool check_value/* = true
                             const wxString msg_text = from_u8((boost::format(_u8L("Do you mean %s%% instead of %s %s?\n"
                                 "Select YES if you want to change this value to %s%%, \n"
                                 "or NO if you are sure that %s %s is a correct value.")) % stVal % stVal % sidetext % stVal % stVal % sidetext).str());
-                            wxMessageDialog dialog(m_parent, msg_text, _L("Parameter validation") + ": " + m_opt_id, wxICON_WARNING | wxYES | wxNO);
+                            WarningDialog dialog(m_parent, msg_text, _L("Parameter validation") + ": " + m_opt_id, wxYES | wxNO);
                             if ((!infill_anchors || val > 100) && dialog.ShowModal() == wxID_YES) {
                                 str += "%";
                                 m_last_validated_value = str;
@@ -525,9 +540,12 @@ void Field::get_value_by_opt_type(wxString& str, const bool check_value/* = true
                         }
                     }
                 }
+            } else {
+                str.ToDouble(&val);
             }
         }
-        m_value = std::string(str.ToUTF8().data());
+
+        m_value = into_u8(str);
         break;
     }
     case coPoints: {
@@ -553,8 +571,8 @@ void Field::get_value_by_opt_type(wxString& str, const bool check_value/* = true
                             out_of_range_val = true;
                             break;
                         }
-                    } 
-                } 
+                    }
+                }
                 invalid_val = true;
                 break;
             }
@@ -564,8 +582,7 @@ void Field::get_value_by_opt_type(wxString& str, const bool check_value/* = true
                 if (!m_value.empty())
                     text_value = get_points_string(boost::any_cast<std::vector<Vec2d>>(m_value));
                 set_value(text_value, true);
-                show_error(m_parent, _L("Input value is out of range")
-                );
+                show_error(m_parent, _L("Input value is out of range"));
             }
             else if (invalid_val) {
                 wxString text_value;
@@ -582,6 +599,24 @@ void Field::get_value_by_opt_type(wxString& str, const bool check_value/* = true
 	default:
 		break;
 	}
+
+    if (!Field::warn_zero_gapfillspeed && ("max_volumetric_speed" == m_opt_id || "gap_fill_speed" == m_opt_id)) {
+        bool show_warning = false;
+        const DynamicPrintConfig& print_config = wxGetApp().preset_bundle->fff_prints.get_edited_preset().config;
+        if ("max_volumetric_speed" == m_opt_id && val > 0)
+            show_warning = print_config.option<ConfigOptionFloatOrPercent>("gap_fill_speed")->value == 0;
+        if ("gap_fill_speed" == m_opt_id && val == 0)
+            show_warning = true;
+        if (show_warning) {
+            const wxString msg_text = from_u8(_u8L("Auto Speed will try to maintain a constant flow rate accross all print moves."
+                "\nIt is not recommended to include gap moves to the Auto Speed calculation(by setting this value to 0)."
+                "\nVery thin gap extrusions will often not max out the flow rate of your printer."
+                "\nAs a result, this will cause Auto Speed to lower the speeds of all other print moves to match the low flow rate of these thin gaps."));
+            wxMessageDialog dialog(m_parent, msg_text, _L("Parameter validation") + ": " + m_opt_id, wxICON_WARNING | wxOK);
+            dialog.ShowModal();
+            Field::warn_zero_gapfillspeed = true;
+        }
+    }
 }
 
 void Field::msw_rescale()
@@ -592,12 +627,16 @@ void Field::msw_rescale()
 
 void Field::sys_color_changed()
 {
+#ifdef _WIN32
+	if (wxWindow* win = this->getWindow())
+		wxGetApp().UpdateDarkUI(win);
+#endif
 }
 
 template<class T>
 bool is_defined_input_value(wxWindow* win, const ConfigOptionType& type)
 {
-    if (!win || (static_cast<T*>(win)->GetValue().empty() && type != coString && type != coStrings))
+    if (!win || (static_cast<T*>(win)->GetValue().empty() && type != coString && type != coStrings && type != coPoints))
         return false;
     return true;
 }
@@ -607,7 +646,7 @@ void TextCtrl::BUILD() {
     if (m_opt.height >= 0) size.SetHeight(m_opt.height*m_em_unit);
     if (m_opt.width >= 0) size.SetWidth(m_opt.width*m_em_unit);
 
-	wxString text_value = wxString(""); 
+	wxString text_value = wxString("");
 
 	switch (m_opt.type) {
     case coFloatOrPercent:
@@ -622,14 +661,14 @@ void TextCtrl::BUILD() {
 		text_value = double_to_string(m_opt.default_value->getFloat(), m_opt.precision);
 		text_value += "%";
 		break;
-	}	
+	}
 	case coPercents:
 	case coFloats:
 	case coFloat:
 	{
 		double val = m_opt.type == coFloats ?
 			m_opt.get_default_value<ConfigOptionFloats>()->get_at(m_opt_idx) :
-			m_opt.type == coFloat ? 
+			m_opt.type == coFloat ?
 				m_opt.default_value->getFloat() :
 				m_opt.get_default_value<ConfigOptionPercents>()->get_at(m_opt_idx);
 		text_value = double_to_string(val, m_opt.precision);
@@ -643,7 +682,7 @@ void TextCtrl::BUILD() {
             text_value += "%";
         break;
     }
-	case coString:			
+	case coString:
 		text_value = m_opt.get_default_value<ConfigOptionString>()->value;
 		break;
 	case coStrings:
@@ -653,21 +692,28 @@ void TextCtrl::BUILD() {
 		text_value = vec->get_at(m_opt_idx);
 		break;
 	}
+    case coPoint:
+        text_value = get_points_string({ m_opt.get_default_value<ConfigOptionPoint>()->value });
+        break;
     case coPoints:
         text_value = get_points_string(m_opt.get_default_value<ConfigOptionPoints>()->values);
         break;
 	default:
-		break; 
+		break;
 	}
     m_last_meaningful_value = text_value;
 
-    const long style = m_opt.multiline ? wxTE_MULTILINE : wxTE_PROCESS_ENTER/*0*/;
+    long style = m_opt.multiline ? wxTE_MULTILINE : wxTE_PROCESS_ENTER;
+#ifdef _WIN32
+	style |= wxBORDER_SIMPLE;
+#endif
     wxTextCtrl* temp = new wxTextCtrl(m_parent, wxID_ANY, text_value, wxDefaultPosition, size, style);
     if (parent_is_custom_ctrl && m_opt.height < 0)
         opt_height = (double)temp->GetSize().GetHeight()/m_em_unit;
     temp->SetFont(m_opt.is_code ?
                   Slic3r::GUI::wxGetApp().code_font():
                   Slic3r::GUI::wxGetApp().normal_font());
+	wxGetApp().UpdateDarkUI(temp);
 
     if (! m_opt.multiline && !wxOSX)
 		// Only disable background refresh for single line input fields, as they are completely painted over by the edit control.
@@ -677,20 +723,18 @@ void TextCtrl::BUILD() {
     temp->OSXDisableAllSmartSubstitutions();
 #endif // __WXOSX__
 
-    if (style == wxTE_PROCESS_ENTER) {
+    if (style & wxTE_PROCESS_ENTER) {
         temp->Bind(wxEVT_TEXT_ENTER, ([this, temp](wxEvent& e)
         {
 #if !defined(__WXGTK__)
             e.Skip();
             temp->GetToolTip()->Enable(true);
 #endif // __WXGTK__
-            bEnterPressed = true;
+            EnterPressed enter(this);
             propagate_value();
         }), temp->GetId());
     }
 
-    temp->Bind(wxEVT_SET_FOCUS, ([this](wxEvent& e) { on_set_focus(e); }), temp->GetId());
-    
 	temp->Bind(wxEVT_LEFT_DOWN, ([temp](wxEvent& event)
 	{
 		//! to allow the default handling
@@ -707,26 +751,11 @@ void TextCtrl::BUILD() {
 	temp->Bind(wxEVT_KILL_FOCUS, ([this, temp](wxEvent& e)
 	{
 		e.Skip();
-#ifdef __WXOSX__
-		// OSX issue: For some unknown reason wxEVT_KILL_FOCUS is emitted twice in a row in some cases 
-	    // (like when information dialog is shown during an update of the option value)
-		// Thus, suppress its second call
-		if (bKilledFocus)
-			return;
-		bKilledFocus = true;
-#endif // __WXOSX__
-
 #if !defined(__WXGTK__)
 		temp->GetToolTip()->Enable(true);
 #endif // __WXGTK__
-        if (bEnterPressed)
-            bEnterPressed = false;
-		else
+        if (!bEnterPressed)
             propagate_value();
-#ifdef __WXOSX__
-		// After processing of KILL_FOCUS event we should to invalidate a bKilledFocus flag
-		bKilledFocus = false;
-#endif // __WXOSX__
 	}), temp->GetId());
 /*
 	// select all text using Ctrl+A
@@ -761,7 +790,7 @@ bool TextCtrl::value_was_changed()
     case coPercents:
     case coFloats:
     case coFloat: {
-        if (m_opt.nullable && std::isnan(boost::any_cast<double>(m_value)) && 
+        if (m_opt.nullable && std::isnan(boost::any_cast<double>(m_value)) &&
                               std::isnan(boost::any_cast<double>(val)))
             return false;
         return boost::any_cast<double>(m_value) != boost::any_cast<double>(val);
@@ -800,9 +829,9 @@ void TextCtrl::set_value(const boost::any& value, bool change_event/* = false*/)
 
     if (!change_event) {
         wxString ret_str = static_cast<wxTextCtrl*>(window)->GetValue();
-        /* Update m_value to correct work of next value_was_changed(). 
-         * But after checking of entered value, don't fix the "incorrect" value and don't show a warning message, 
-         * just clear m_value in this case. 
+        /* Update m_value to correct work of next value_was_changed().
+         * But after checking of entered value, don't fix the "incorrect" value and don't show a warning message,
+         * just clear m_value in this case.
          */
         get_value_by_opt_type(ret_str, false);
     }
@@ -834,7 +863,7 @@ void TextCtrl::msw_rescale()
     Field::msw_rescale();
     auto size = wxSize(def_width() * m_em_unit, wxDefaultCoord);
 
-    if (m_opt.height >= 0) 
+    if (m_opt.height >= 0)
         size.SetHeight(m_opt.height*m_em_unit);
     else if (parent_is_custom_ctrl && opt_height > 0)
         size.SetHeight(lround(opt_height*m_em_unit));
@@ -864,33 +893,79 @@ void TextCtrl::change_field_value(wxEvent& event)
 #endif //__WXGTK__
 
 void CheckBox::BUILD() {
-	auto size = wxSize(wxDefaultSize);
-	if (m_opt.height >= 0) size.SetHeight(m_opt.height*m_em_unit);
-	if (m_opt.width >= 0) size.SetWidth(m_opt.width*m_em_unit);
+    auto size = wxSize(wxDefaultSize);
+    if (m_opt.height >= 0) size.SetHeight(m_opt.height * m_em_unit);
+    if (m_opt.width >= 0) size.SetWidth(m_opt.width * m_em_unit);
 
-	bool check_value =	m_opt.type == coBool ? 
-						m_opt.default_value->getBool() : m_opt.type == coBools ? 
-							m_opt.get_default_value<ConfigOptionBools>()->get_at(m_opt_idx) : 
-    						false;
+    bool check_value = m_opt.type == coBool ?
+        m_opt.default_value->getBool() : m_opt.type == coBools ?
+        m_opt.get_default_value<ConfigOptionBools>()->get_at(m_opt_idx) :
+        false;
 
     m_last_meaningful_value = static_cast<unsigned char>(check_value);
 
-	// Set Label as a string of at least one space simbol to correct system scaling of a CheckBox 
-	auto temp = new wxCheckBox(m_parent, wxID_ANY, wxString(" "), wxDefaultPosition, size); 
-	temp->SetFont(Slic3r::GUI::wxGetApp().normal_font());
-	if (!wxOSX) temp->SetBackgroundStyle(wxBG_STYLE_PAINT);
-	temp->SetValue(check_value);
-	if (m_opt.readonly) temp->Disable();
+#ifdef __WXGTK2__
+    //gtk2 can't resize checkboxes, so we are using togglable buttons instead
+    if (m_em_unit > 14) {
+        size = wxSize(def_width_thinner() * m_em_unit / 2, def_width_thinner() * m_em_unit / 2);
+        auto temp = new wxToggleButton(m_parent, wxID_ANY, wxString(" "), wxDefaultPosition, size, m_opt.is_script ? wxCHK_3STATE : wxCHK_2STATE);
+        temp->Bind(wxEVT_TOGGLEBUTTON, ([this, temp](wxCommandEvent e) {
+            m_is_na_val = false;
+            if (temp->GetValue())
+                temp->SetLabel("X");
+            else
+                temp->SetLabel("");
+            on_change_field();
+        }), temp->GetId());
+        // recast as a wxWindow to fit the calling convention
+        window = dynamic_cast<wxWindow*>(temp);
+    }
+    else
+#endif
+    {
+        // Set Label as a string of at least one space simbol to correct system scaling of a CheckBox
+        auto temp = new wxCheckBox(m_parent, wxID_ANY, wxString(" "), wxDefaultPosition, size, m_opt.is_script ? wxCHK_3STATE : wxCHK_2STATE);
+        temp->Bind(wxEVT_CHECKBOX, ([this](wxCommandEvent e) {
+            m_is_na_val = false;
+            on_change_field();
+        }), temp->GetId());
+        // recast as a wxWindow to fit the calling convention
+        window = dynamic_cast<wxWindow*>(temp);
+    }
+    window->SetFont(Slic3r::GUI::wxGetApp().normal_font());
+	if (!wxOSX) window->SetBackgroundStyle(wxBG_STYLE_PAINT);
+	if (m_opt.readonly) window->Enable(false);
+    
 
-	temp->Bind(wxEVT_CHECKBOX, ([this](wxCommandEvent e) {
-        m_is_na_val = false;
-	    on_change_field();
-	}), temp->GetId());
+    //set value (need the window for the set_value)
+    if (m_opt.is_script && !m_opt.default_script_value.empty())
+        set_value(m_opt.default_script_value, false);
+    else
+        set_widget_value(check_value);
 
-	// recast as a wxWindow to fit the calling convention
-	window = dynamic_cast<wxWindow*>(temp);
-
+    // you need to set the window before the tooltip
     this->set_tooltip(check_value ? "true" : "false");
+}
+
+void CheckBox::set_widget_value(bool new_val)
+{
+    wxCheckBox* chk = dynamic_cast<wxCheckBox*>(window);
+    if (chk != nullptr) {
+        chk->SetValue(new_val);
+    }
+#ifdef __WXGTK2__
+    else
+    {
+        wxToggleButton* tgl = dynamic_cast<wxToggleButton*>(window);
+        if (tgl) {
+            tgl->SetValue(new_val);
+            if (new_val)
+                tgl->SetLabel("X");
+            else
+                tgl->SetLabel("");
+        }
+    }
+#endif
 }
 
 void CheckBox::set_value(const boost::any& value, bool change_event)
@@ -900,10 +975,15 @@ void CheckBox::set_value(const boost::any& value, bool change_event)
         m_is_na_val = boost::any_cast<unsigned char>(value) == ConfigOptionBoolsNullable::nil_value();
         if (!m_is_na_val)
             m_last_meaningful_value = value;
-        dynamic_cast<wxCheckBox*>(window)->SetValue(m_is_na_val ? false : boost::any_cast<unsigned char>(value) != 0);
-    }
-    else
-        dynamic_cast<wxCheckBox*>(window)->SetValue(boost::any_cast<bool>(value));
+        set_widget_value(m_is_na_val ? false : boost::any_cast<unsigned char>(value) != 0);
+    } else if (m_opt.is_script) {
+        uint8_t val = boost::any_cast<uint8_t>(value);
+        if (val == uint8_t(2) && dynamic_cast<wxCheckBox*>(window) != nullptr)
+            dynamic_cast<wxCheckBox*>(window)->Set3StateValue(wxCheckBoxState::wxCHK_UNDETERMINED);
+        else
+            set_widget_value(val != 0);
+    } else
+        set_widget_value(boost::any_cast<bool>(value));
     m_disable_change_event = false;
 }
 
@@ -911,7 +991,7 @@ void CheckBox::set_last_meaningful_value()
 {
     if (m_opt.nullable) {
         m_is_na_val = false;
-        dynamic_cast<wxCheckBox*>(window)->SetValue(boost::any_cast<unsigned char>(m_last_meaningful_value) != 0);
+        set_widget_value(boost::any_cast<unsigned char>(m_last_meaningful_value) != 0);
         on_change_field();
     }
 }
@@ -920,7 +1000,7 @@ void CheckBox::set_na_value()
 {
     if (m_opt.nullable) {
         m_is_na_val = true;
-        dynamic_cast<wxCheckBox*>(window)->SetValue(false);
+        set_widget_value(false);
         on_change_field();
     }
 }
@@ -928,7 +1008,18 @@ void CheckBox::set_na_value()
 boost::any& CheckBox::get_value()
 {
 // 	boost::any m_value;
-	bool value = dynamic_cast<wxCheckBox*>(window)->GetValue();
+    bool value = false;
+    wxCheckBox* chk = dynamic_cast<wxCheckBox*>(window);
+    if (chk != nullptr) {
+        value = chk->GetValue();
+    }
+#ifdef __WXGTK2__
+    else
+    {
+        wxToggleButton* tgl = dynamic_cast<wxToggleButton*>(window);
+        if (tgl) value = tgl->GetValue();
+    }
+#endif
 	if (m_opt.type == coBool)
 		m_value = static_cast<bool>(value);
 	else
@@ -940,8 +1031,17 @@ void CheckBox::msw_rescale()
 {
     Field::msw_rescale();
 
-    wxCheckBox* field = dynamic_cast<wxCheckBox*>(window);
-    field->SetMinSize(wxSize(-1, int(1.5f*field->GetFont().GetPixelSize().y +0.5f)));
+    wxCheckBox* chk = dynamic_cast<wxCheckBox*>(window);
+    if (chk != nullptr) {
+        chk->SetMinSize(wxSize(-1, int(1.5f * chk->GetFont().GetPixelSize().y + 0.5f)));
+    }
+#ifdef __WXGTK2__
+    else
+    { //a bit useless as it's a windows-only func. To have a correct thing, you have to del the previous window and create a new one anyway.
+        wxToggleButton* tgl = dynamic_cast<wxToggleButton*>(window);
+        if (tgl) tgl->SetMinSize(wxSize(def_width_thinner() * m_em_unit / 2, def_width_thinner() * m_em_unit / 2));
+    }
+#endif
 }
 
 
@@ -973,20 +1073,25 @@ void SpinCtrl::BUILD() {
 		break;
 	}
 
-    const int min_val = m_opt.min == INT_MIN 
+    const int min_val = m_opt.min == INT_MIN
 #ifdef __WXOSX__
-    // We will forcibly set the input value for SpinControl, since the value 
+    // We will forcibly set the input value for SpinControl, since the value
     // inserted from the keyboard is not updated under OSX.
     // So, we can't set min control value bigger then 0.
-    // Otherwise, it couldn't be possible to input from keyboard value 
+    // Otherwise, it couldn't be possible to input from keyboard value
     // less then min_val.
-    || m_opt.min > 0 
+    || m_opt.min > 0
 #endif
     ? 0 : m_opt.min;
 	const int max_val = m_opt.max < 2147483647 ? m_opt.max : 2147483647;
 
 	auto temp = new wxSpinCtrl(m_parent, wxID_ANY, text_value, wxDefaultPosition, size,
-		0|wxTE_PROCESS_ENTER, min_val, max_val, default_value);
+		wxTE_PROCESS_ENTER | wxSP_ARROW_KEYS
+#ifdef _WIN32
+		| wxBORDER_SIMPLE
+#endif 
+		, min_val, max_val, default_value);
+
 #ifdef __WXGTK3__
 	wxSize best_sz = temp->GetBestSize();
 	if (best_sz.x > size.x)
@@ -994,6 +1099,7 @@ void SpinCtrl::BUILD() {
 #endif //__WXGTK3__
 	temp->SetFont(Slic3r::GUI::wxGetApp().normal_font());
     if (!wxOSX) temp->SetBackgroundStyle(wxBG_STYLE_PAINT);
+	wxGetApp().UpdateDarkUI(temp);
 
     if (m_opt.height < 0 && parent_is_custom_ctrl)
         opt_height = (double)temp->GetSize().GetHeight() / m_em_unit;
@@ -1016,8 +1122,8 @@ void SpinCtrl::BUILD() {
         propagate_value();
 	}));
 
-    temp->Bind(wxEVT_SPINCTRL, ([this](wxCommandEvent e) {  propagate_value();  }), temp->GetId()); 
-    
+    temp->Bind(wxEVT_SPINCTRL, ([this](wxCommandEvent e) {  propagate_value();  }), temp->GetId());
+
     temp->Bind(wxEVT_TEXT_ENTER, ([this](wxCommandEvent e)
     {
         e.Skip();
@@ -1025,7 +1131,7 @@ void SpinCtrl::BUILD() {
         bEnterPressed = true;
     }), temp->GetId());
 
-	temp->Bind(wxEVT_TEXT, ([this](wxCommandEvent e)
+	temp->Bind(wxEVT_TEXT, ([this, temp](wxCommandEvent e)
 	{
 // 		# On OSX / Cocoa, wxSpinCtrl::GetValue() doesn't return the new value
 // 		# when it was changed from the text control, so the on_change callback
@@ -1035,26 +1141,34 @@ void SpinCtrl::BUILD() {
 
 		long value;
 		const bool parsed = e.GetString().ToLong(&value);
-		tmp_value = parsed && value >= INT_MIN && value <= INT_MAX ? (int)value : UNDEF_VALUE;
-
+        if (!parsed || value < INT_MIN || value > INT_MAX)
+            tmp_value = UNDEF_VALUE;
+        else {
+            tmp_value = (int)std::min(std::max((double)value, m_opt.min), m_opt.max);
 #ifdef __WXOSX__
-        // Forcibly set the input value for SpinControl, since the value 
-	    // inserted from the keyboard or clipboard is not updated under OSX
-        if (tmp_value != UNDEF_VALUE) {
-            wxSpinCtrl* spin = static_cast<wxSpinCtrl*>(window);
-            spin->SetValue(tmp_value);
-
+            // Forcibly set the input value for SpinControl, since the value
+            // inserted from the keyboard or clipboard is not updated under OSX
+            temp->SetValue(tmp_value);
             // But in SetValue() is executed m_text_ctrl->SelectAll(), so
             // discard this selection and set insertion point to the end of string
-            spin->GetText()->SetInsertionPointEnd();
-        }
+            temp->GetText()->SetInsertionPointEnd();
+#else
+            // update value for the control only if it was changed in respect to the Min/max values
+            if (tmp_value != (int)value) {
+                temp->SetValue(tmp_value);
+                // But after SetValue() cursor ison the first position
+                // so put it to the end of string
+                int pos = std::to_string(tmp_value).length();
+                temp->SetSelection(pos, pos);
+            }
 #endif
+        }
 	}), temp->GetId());
 
 	// recast as a wxWindow to fit the calling convention
 	window = dynamic_cast<wxWindow*>(temp);
 
-    //prblem: it has 2 window, with a child: the mouse enter event won't fire if in children!
+    //problem: it has 2 windows, with a child: the mouse enter event won't fire if in children! (also it need the windoww, so put it after)
     this->set_tooltip(text_value);
 }
 
@@ -1098,7 +1212,11 @@ void SpinCtrl::msw_rescale()
 static_assert(wxMAJOR_VERSION >= 3, "Use of wxBitmapComboBox on Settings Tabs requires wxWidgets 3.0 and newer");
 using choice_ctrl = wxBitmapComboBox;
 #else
+#ifdef _WIN32
+using choice_ctrl = BitmapComboBox;
+#else
 using choice_ctrl = wxComboBox;
+#endif
 #endif // __WXOSX__
 
 void Choice::BUILD() {
@@ -1106,10 +1224,10 @@ void Choice::BUILD() {
     if (m_opt.height >= 0) size.SetHeight(m_opt.height*m_em_unit);
     if (m_opt.width >= 0) size.SetWidth(m_opt.width*m_em_unit);
 
-	choice_ctrl* temp;	
-    if (!m_opt.gui_type.empty() && m_opt.gui_type.compare("select_open") != 0) {
+	choice_ctrl* temp;
+    if (m_opt.gui_type != ConfigOptionDef::GUIType::undefined && m_opt.gui_type != ConfigOptionDef::GUIType::select_open) {
         m_is_editable = true;
-        temp = new choice_ctrl(m_parent, wxID_ANY, wxString(""), wxDefaultPosition, size);
+        temp = new choice_ctrl(m_parent, wxID_ANY, wxString(""), wxDefaultPosition, size, 0, nullptr, wxTE_PROCESS_ENTER);
     }
     else {
 #ifdef __WXOSX__
@@ -1172,44 +1290,55 @@ void Choice::BUILD() {
     }, temp->GetId());
 
     if (m_is_editable) {
-        temp->Bind(wxEVT_KILL_FOCUS, ([this](wxEvent& e) {
+        temp->Bind(wxEVT_KILL_FOCUS, [this](wxEvent& e) {
             e.Skip();
-            if (m_opt.type == coStrings) {
-                on_change_field();
-                return;
-            }
+            if (!bEnterPressed)
+                propagate_value();
+        } );
 
-            if (is_defined_input_value<choice_ctrl>(window, m_opt.type)) {
-                switch (m_opt.type) {
-                case coFloatOrPercent:
-                {
-                    std::string old_val = !m_value.empty() ? boost::any_cast<std::string>(m_value) : "";
-                    if (old_val == boost::any_cast<std::string>(get_value()))
-                        return;
-                    break;
-                }
-                case coInt:
-                {
-                    int old_val = !m_value.empty() ? boost::any_cast<int>(m_value) : 0;
-                    if (old_val == boost::any_cast<int>(get_value()))
-                        return;
-                    break;
-                }
-                default:
-                {
-                    double old_val = !m_value.empty() ? boost::any_cast<double>(m_value) : -99999;
-                    if (fabs(old_val - boost::any_cast<double>(get_value())) <= 0.0001)
-                        return;
-                }
-                }
-                on_change_field();
-            }
-            else
-                on_kill_focus();
-        }), temp->GetId());
+        temp->Bind(wxEVT_TEXT_ENTER, [this](wxEvent& e) {
+            EnterPressed enter(this);
+            propagate_value();
+        } );
     }
 
     this->set_tooltip(temp->GetValue());
+}
+
+void Choice::propagate_value()
+{
+    if (m_opt.type == coStrings) {
+        on_change_field();
+        return;
+    }
+
+    if (is_defined_input_value<choice_ctrl>(window, m_opt.type)) {
+        switch (m_opt.type) {
+        case coFloatOrPercent:
+        {
+            std::string old_val = !m_value.empty() ? boost::any_cast<std::string>(m_value) : "";
+            if (old_val == boost::any_cast<std::string>(get_value()))
+                return;
+            break;
+        }
+        case coInt:
+        {
+            int old_val = !m_value.empty() ? boost::any_cast<int>(m_value) : 0;
+            if (old_val == boost::any_cast<int>(get_value()))
+                return;
+            break;
+        }
+        default:
+        {
+            double old_val = !m_value.empty() ? boost::any_cast<double>(m_value) : -99999;
+            if (fabs(old_val - boost::any_cast<double>(get_value())) <= 0.0001)
+                return;
+        }
+        }
+        on_change_field();
+    }
+    else
+        on_kill_focus();
 }
 
 void Choice::suppress_scroll()
@@ -1229,8 +1358,7 @@ void Choice::set_selection()
     choice_ctrl* field = dynamic_cast<choice_ctrl*>(window);
 	switch (m_opt.type) {
 	case coEnum:{
-		int id_value = m_opt.get_default_value<ConfigOptionEnum<SeamPosition>>()->value; //!!
-        field->SetSelection(id_value);
+        field->SetSelection(m_opt.default_value->getInt());
 		break;
 	}
 	case coFloat:
@@ -1257,7 +1385,7 @@ void Choice::set_selection()
 	}
 
 	if (!text_value.IsEmpty()) {
-		int idx = 0;
+        size_t idx = 0;
 		for (auto el : m_opt.enum_values) {
 			if (el == text_value)
 				break;
@@ -1280,19 +1408,18 @@ void Choice::set_value(const std::string& value, bool change_event)  //! Redunda
 	}
 
     choice_ctrl* field = dynamic_cast<choice_ctrl*>(window);
-	idx == m_opt.enum_values.size() ? 
+	idx == m_opt.enum_values.size() ?
 		field->SetValue(value) :
 		field->SetSelection(idx);
-	
+
 	m_disable_change_event = false;
 }
 
-template<class T>
-int Choice::idx_from_enum_value(int val) {
+int32_t Choice::idx_from_enum_value(int32_t val) {
     if (!m_opt.enum_values.empty()) {
         std::string key;
-        t_config_enum_values map_names = ConfigOptionEnum<T>::get_enum_values();
-        for (auto it : map_names) {
+        const t_config_enum_values* map_names = m_opt.enum_keys_map;
+        for (auto it : *map_names) {
             if (val == it.second) {
                 key = it.first;
                 break;
@@ -1327,7 +1454,7 @@ void Choice::set_value(const boost::any& value, bool change_event)
 	case coString:
 	case coStrings: {
 		wxString text_value;
-		if (m_opt.type == coInt) 
+		if (m_opt.type == coInt)
 			text_value = wxString::Format(_T("%i"), int(boost::any_cast<int>(value)));
 		else
 			text_value = boost::any_cast<wxString>(value);
@@ -1347,56 +1474,21 @@ void Choice::set_value(const boost::any& value, bool change_event)
         }
         else
 			field->SetSelection(idx);
+
+        if (!m_value.empty() && m_opt.opt_key == "fill_density") {
+            // If m_value was changed before, then update m_value here too to avoid case 
+            // when control's value is already changed from the ConfigManipulation::update_print_fff_config(),
+            // but m_value doesn't respect it.
+            if (double val; text_value.ToDouble(&val))
+                m_value = val;
+        }
+
 		break;
 	}
 	case coEnum: {
-		int val = boost::any_cast<int>(value);
-        if (m_opt_id.compare("host_type") == 0 && val != 0 && 
-            m_opt.enum_values.size() > field->GetCount()) // for case, when PrusaLink isn't used as a HostType
-            val--;
-
-        if (m_opt_id == "top_fill_pattern" || m_opt_id == "bottom_fill_pattern" || m_opt_id == "solid_fill_pattern"
-            || m_opt_id == "fill_pattern" || m_opt_id == "support_material_interface_pattern" || m_opt_id == "brim_ears_pattern")
-            val = idx_from_enum_value<InfillPattern>(val);
-        else if (m_opt_id.compare("complete_objects_sort") == 0)
-            val = idx_from_enum_value<CompleteObjectSort>(val);
-        else if (m_opt_id.compare("display_orientation") == 0)
-            val = idx_from_enum_value<SLADisplayOrientation>(val);
-        else if (m_opt_id.compare("gcode_flavor") == 0)
-            val = idx_from_enum_value<GCodeFlavor>(val);
-        else if (m_opt_id.compare("host_type") == 0)
-            val = idx_from_enum_value<PrintHostType>(val);
-        else if (m_opt_id =="infill_connection" || m_opt_id =="infill_connection_solid"
-                || m_opt_id =="infill_connection_top" || m_opt_id =="infill_connection_bottom")
-            val = idx_from_enum_value<InfillConnection>(val);
-        else if (m_opt_id.compare("infill_dense_algo") == 0)
-            val = idx_from_enum_value<DenseInfillAlgo>(val);
-        else if (m_opt_id == "ironing_type")
-            val = idx_from_enum_value<IroningType>(val);
-        else if (m_opt_id.compare("machine_limits_usage") == 0)
-            val = idx_from_enum_value<MachineLimitsUsage>(val);
-        else if (m_opt_id.compare("no_perimeter_unsupported_algo") == 0)
-            val = idx_from_enum_value<NoPerimeterUnsupportedAlgo>(val);
-        else if (m_opt_id.compare("perimeter_loop_seam") == 0)
-            val = idx_from_enum_value<SeamPosition>(val);
-        else if (m_opt_id == "printhost_authorization_type")
-            val = idx_from_enum_value<AuthorizationType>(val);
-        else if (m_opt_id.compare("remaining_times_type") == 0)
-            val = idx_from_enum_value<RemainingTimeType>(val);
-        else if (m_opt_id.compare("seam_position") == 0)
-            val = idx_from_enum_value<SeamPosition>(val);
-        else if (m_opt_id.compare("support_material_contact_distance_type") == 0)
-            val = idx_from_enum_value<SupportZDistanceType>(val);
-        else if (m_opt_id.compare("support_material_pattern") == 0)
-            val = idx_from_enum_value<SupportMaterialPattern>(val);
-        else if (m_opt_id.compare("support_pillar_connection_mode") == 0)
-            val = idx_from_enum_value<SLAPillarConnectionMode>(val);
-        else if (m_opt_id.compare("wipe_advanced_algo") == 0)
-            val = idx_from_enum_value<WipeAlgo>(val);
-        else if (m_opt_id.compare("output_format") == 0)
-            val = idx_from_enum_value<OutputFormat>(val);
-        else if (m_opt_id.compare("config_compatibility") == 0)
-            val = idx_from_enum_value<ForwardCompatibilitySubstitutionRule>(val);
+        int32_t val = boost::any_cast<int32_t>(value);
+        val = idx_from_enum_value(val);
+		BOOST_LOG_TRIVIAL(debug) << "Set field from key "<< m_opt_id << " as int " << boost::any_cast<int>(value) << " modified to " << val;
 		field->SetSelection(val);
 		break;
 	}
@@ -1408,8 +1500,10 @@ void Choice::set_value(const boost::any& value, bool change_event)
 }
 
 //! it's needed for _update_serial_ports()
+//Please don't use that on Enum fields it will just break everything
 void Choice::set_values(const std::vector<std::string>& values)
 {
+    assert(m_opt.type != coEnum);
 	if (values.empty())
 		return;
 	m_disable_change_event = true;
@@ -1427,22 +1521,22 @@ void Choice::set_values(const std::vector<std::string>& values)
 	m_disable_change_event = false;
 }
 
-template<class T>
-void Choice::convert_to_enum_value(int ret_enum) {
+void Choice::convert_to_enum_value(int32_t ret_enum) {
     if (!m_opt.enum_values.empty()) {
         std::string key = m_opt.enum_values[ret_enum];
-        t_config_enum_values map_names = ConfigOptionEnum<T>::get_enum_values();
-        int value = map_names.at(key);
+        const t_config_enum_values *map_names = m_opt.enum_keys_map;
+        int32_t value = map_names->at(key);
 
-        m_value = static_cast<T>(value);
+        m_value = value;
     }
     else
-        m_value = static_cast<T>(m_opt.default_value.get()->getInt());
+        m_value = m_opt.default_value.get()->getInt();
 }
 
-//TODO: check if used (from prusa)
+//Please don't use that on Enum fields it will just break everything
 void Choice::set_values(const wxArrayString &values)
 {
+    assert(m_opt.type != coEnum);
 	if (values.empty())
 		return;
 
@@ -1465,7 +1559,7 @@ boost::any& Choice::get_value()
 {
     choice_ctrl* field = dynamic_cast<choice_ctrl*>(window);
 
-	wxString ret_str = field->GetValue();	
+	wxString ret_str = field->GetValue();
 
 	// options from right panel
 	std::vector <std::string> right_panel_options{ "support", "pad", "scale_unit" };
@@ -1476,72 +1570,32 @@ boost::any& Choice::get_value()
 	if (m_opt.type == coEnum)
     {
         int ret_enum = field->GetSelection();
-        if (m_opt_id.compare("host_type") == 0 &&
-            m_opt.enum_values.size() > field->GetCount()) // for case, when PrusaLink isn't used as a HostType
-            ret_enum++;
-        if (m_opt_id == "top_fill_pattern" || m_opt_id == "bottom_fill_pattern" || m_opt_id == "solid_fill_pattern" 
-            || m_opt_id == "support_material_interface_pattern" || m_opt_id == "fill_pattern" || m_opt_id == "brim_ears_pattern")
-            convert_to_enum_value<InfillPattern>(ret_enum);
-        else if (m_opt_id.compare("complete_objects_sort") == 0)
-            convert_to_enum_value<CompleteObjectSort>(ret_enum);
-        else if (m_opt_id.compare("display_orientation") == 0)
-            convert_to_enum_value<SLADisplayOrientation>(ret_enum);
-        else if (m_opt_id.compare("gcode_flavor") == 0)
-            convert_to_enum_value<GCodeFlavor>(ret_enum);
-        else if (m_opt_id.compare("host_type") == 0)
-            convert_to_enum_value<PrintHostType>(ret_enum);
-        else if (m_opt_id =="infill_connection" || m_opt_id =="infill_connection_solid"
-                || m_opt_id =="infill_connection_top" || m_opt_id =="infill_connection_bottom")
-            convert_to_enum_value<InfillConnection>(ret_enum);
-        else if (m_opt_id.compare("infill_dense_algo") == 0)
-            convert_to_enum_value<DenseInfillAlgo>(ret_enum);
-        else if (m_opt_id == "ironing_type")
-            convert_to_enum_value<IroningType>(ret_enum);
-        else if (m_opt_id.compare("machine_limits_usage") == 0)
-            convert_to_enum_value<MachineLimitsUsage>(ret_enum);
-        else if (m_opt_id.compare("no_perimeter_unsupported_algo") == 0)
-            convert_to_enum_value<NoPerimeterUnsupportedAlgo>(ret_enum);
-        else if (m_opt_id.compare("perimeter_loop_seam") == 0)
-            convert_to_enum_value<SeamPosition>(ret_enum);
-        else if (m_opt_id == "printhost_authorization_type")
-            convert_to_enum_value<AuthorizationType>(ret_enum);
-        else if (m_opt_id.compare("remaining_times_type") == 0)
-            convert_to_enum_value<RemainingTimeType>(ret_enum);
-        else if (m_opt_id.compare("seam_position") == 0)
-            convert_to_enum_value<SeamPosition>(ret_enum);
-        else if (m_opt_id.compare("support_material_contact_distance_type") == 0)
-            convert_to_enum_value<SupportZDistanceType>(ret_enum);
-        else if (m_opt_id.compare("support_material_pattern") == 0)
-            convert_to_enum_value<SupportMaterialPattern>(ret_enum);
-        else if (m_opt_id.compare("support_pillar_connection_mode") == 0)
-            convert_to_enum_value<SLAPillarConnectionMode>(ret_enum);
-        else if (m_opt_id.compare("wipe_advanced_algo") == 0)
-            convert_to_enum_value<WipeAlgo>(ret_enum);
-        else if (m_opt_id.compare("output_format") == 0)
-            convert_to_enum_value<OutputFormat>(ret_enum);
-        else if(m_opt_id.compare("config_compatibility") == 0)
-            convert_to_enum_value<ForwardCompatibilitySubstitutionRule>(ret_enum);
+        convert_to_enum_value(ret_enum);
     }
-    else if (m_opt.gui_type == "f_enum_open") {
+    else if (m_opt.gui_type == ConfigOptionDef::GUIType::f_enum_open || m_opt.gui_type == ConfigOptionDef::GUIType::i_enum_open) {
         const int ret_enum = field->GetSelection();
-        if (ret_enum < 0 || m_opt.enum_values.empty() || m_opt.type == coStrings ||
+        if (!m_opt.enum_values.empty() && (m_opt.type == coString || m_opt.type == coStrings) && ret_enum >=0 && ret_enum < m_opt.enum_values.size()) {
+            m_value = m_opt.enum_values[ret_enum];
+        } else if (ret_enum < 0 || m_opt.enum_values.empty() || m_opt.type == coStrings ||
             (ret_str != m_opt.enum_values[ret_enum] && ret_str != _(m_opt.enum_labels[ret_enum])))
 			// modifies ret_string!
             get_value_by_opt_type(ret_str);
         else if (m_opt.type == coFloatOrPercent)
             m_value = m_opt.enum_values[ret_enum];
+        else if (m_opt.type == coInt)
+            m_value = atoi(m_opt.enum_values[ret_enum].c_str());
         else
-            m_value = atof(m_opt.enum_values[ret_enum].c_str());
+            m_value = string_to_double_decimal_point(m_opt.enum_values[ret_enum]);
     }
-	else	
+	else
 		// modifies ret_string!
         get_value_by_opt_type(ret_str);
 
 	return m_value;
 }
 
-void Choice::enable()  { dynamic_cast<choice_ctrl*>(window)->Enable(); };
-void Choice::disable() { dynamic_cast<choice_ctrl*>(window)->Disable(); };
+void Choice::enable()  { dynamic_cast<choice_ctrl*>(window)->Enable(); }
+void Choice::disable() { dynamic_cast<choice_ctrl*>(window)->Disable(); }
 
 void Choice::msw_rescale()
 {
@@ -1551,8 +1605,8 @@ void Choice::msw_rescale()
 #ifdef __WXOSX__
     const wxString selection = field->GetValue();// field->GetString(index);
 
-	/* To correct scaling (set new controll size) of a wxBitmapCombobox 
-	 * we need to refill control with new bitmaps. So, in our case : 
+	/* To correct scaling (set new controll size) of a wxBitmapCombobox
+	 * we need to refill control with new bitmaps. So, in our case :
 	 * 1. clear control
 	 * 2. add content
 	 * 3. add scaled "empty" bitmap to the at least one item
@@ -1560,7 +1614,7 @@ void Choice::msw_rescale()
     field->Clear();
     wxSize size(wxDefaultSize);
     size.SetWidth((m_opt.width > 0 ? m_opt.width : def_width_wider()) * m_em_unit);
- 
+
     // Set rescaled min height to correct layout
     field->SetMinSize(wxSize(-1, int(1.5f*field->GetFont().GetPixelSize().y + 0.5f)));
     // Set rescaled size
@@ -1571,7 +1625,7 @@ void Choice::msw_rescale()
     	size_t counter = 0;
     	bool   labels = ! m_opt.enum_labels.empty();
         for (const std::string &el : labels ? m_opt.enum_labels : m_opt.enum_values) {
-        	wxString text = labels ? _(el) : wxString::FromUTF8(el.c_str());
+        	wxString text = labels ? _(el) : from_u8(el);
             field->Append(text);
             if (text == selection)
                 idx = counter;
@@ -1579,14 +1633,13 @@ void Choice::msw_rescale()
         }
     }
 
-    wxBitmap empty_bmp(1, field->GetFont().GetPixelSize().y + 2);
-    empty_bmp.SetWidth(0);
-    field->SetItemBitmap(0, empty_bmp);
-
     idx == m_opt.enum_values.size() ?
         field->SetValue(selection) :
         field->SetSelection(idx);
 #else
+#ifdef _WIN32
+    field->Rescale();
+#endif
     auto size = wxSize(def_width_wider() * m_em_unit, wxDefaultCoord);
     if (m_opt.height >= 0) size.SetHeight(m_opt.height * m_em_unit);
     if (m_opt.width >= 0) size.SetWidth(m_opt.width * m_em_unit);
@@ -1623,6 +1676,8 @@ void ColourPicker::BUILD()
         opt_height = (double)temp->GetSize().GetHeight() / m_em_unit;
     temp->SetFont(Slic3r::GUI::wxGetApp().normal_font());
     if (!wxOSX) temp->SetBackgroundStyle(wxBG_STYLE_PAINT);
+
+	wxGetApp().UpdateDarkUI(temp->GetPickerCtrl());
 
 	// 	// recast as a wxWindow to fit the calling convention
 	window = dynamic_cast<wxWindow*>(temp);
@@ -1683,11 +1738,11 @@ void ColourPicker::msw_rescale()
 
 	wxColourPickerCtrl* field = dynamic_cast<wxColourPickerCtrl*>(window);
     auto size = wxSize(def_width() * m_em_unit, wxDefaultCoord);
-    if (m_opt.height >= 0) 
+    if (m_opt.height >= 0)
         size.SetHeight(m_opt.height * m_em_unit);
     else if (parent_is_custom_ctrl && opt_height > 0)
         size.SetHeight(lround(opt_height * m_em_unit));
-	if (m_opt.width >= 0) size.SetWidth(m_opt.width * m_em_unit);
+    if (m_opt.width >= 0) size.SetWidth(m_opt.width * m_em_unit);
     if (parent_is_custom_ctrl)
         field->SetSize(size);
     else
@@ -1697,24 +1752,41 @@ void ColourPicker::msw_rescale()
         set_undef_value(field);
 }
 
+void ColourPicker::sys_color_changed()
+{
+#ifdef _WIN32
+	if (wxWindow* win = this->getWindow())
+		if (wxColourPickerCtrl* picker = dynamic_cast<wxColourPickerCtrl*>(win))
+			wxGetApp().UpdateDarkUI(picker->GetPickerCtrl(), true);
+#endif
+}
+
 void PointCtrl::BUILD()
 {
 	auto temp = new wxBoxSizer(wxHORIZONTAL);
 
     const wxSize field_size(4 * m_em_unit, -1);
 
-	auto default_pt = m_opt.get_default_value<ConfigOptionPoints>()->values.at(0);
+    Vec2d default_pt;
+    if(m_opt.type==coPoint)
+        default_pt = m_opt.get_default_value<ConfigOptionPoint>()->value;
+    else // coPoints
+        default_pt = m_opt.get_default_value<ConfigOptionPoints>()->values.at(0);
 	double val = default_pt(0);
 	wxString X = val - int(val) == 0 ? wxString::Format(_T("%i"), int(val)) : wxNumberFormatter::ToString(val, 2, wxNumberFormatter::Style_None);
 	val = default_pt(1);
 	wxString Y = val - int(val) == 0 ? wxString::Format(_T("%i"), int(val)) : wxNumberFormatter::ToString(val, 2, wxNumberFormatter::Style_None);
 
-	x_textctrl = new wxTextCtrl(m_parent, wxID_ANY, X, wxDefaultPosition, field_size, wxTE_PROCESS_ENTER);
-	y_textctrl = new wxTextCtrl(m_parent, wxID_ANY, Y, wxDefaultPosition, field_size, wxTE_PROCESS_ENTER);
+	long style = wxTE_PROCESS_ENTER;
+#ifdef _WIN32
+	style |= wxBORDER_SIMPLE;
+#endif
+	x_textctrl = new wxTextCtrl(m_parent, wxID_ANY, X, wxDefaultPosition, field_size, style);
+	y_textctrl = new wxTextCtrl(m_parent, wxID_ANY, Y, wxDefaultPosition, field_size, style);
     if (parent_is_custom_ctrl && m_opt.height < 0)
         opt_height = (double)x_textctrl->GetSize().GetHeight() / m_em_unit;
 
-	x_textctrl->SetFont(Slic3r::GUI::wxGetApp().normal_font());
+    x_textctrl->SetFont(Slic3r::GUI::wxGetApp().normal_font());
 	x_textctrl->SetBackgroundStyle(wxBG_STYLE_PAINT);
 	y_textctrl->SetFont(Slic3r::GUI::wxGetApp().normal_font());
 	y_textctrl->SetBackgroundStyle(wxBG_STYLE_PAINT);
@@ -1725,6 +1797,11 @@ void PointCtrl::BUILD()
 	static_text_x->SetBackgroundStyle(wxBG_STYLE_PAINT);
 	static_text_y->SetFont(Slic3r::GUI::wxGetApp().normal_font());
 	static_text_y->SetBackgroundStyle(wxBG_STYLE_PAINT);
+
+	wxGetApp().UpdateDarkUI(x_textctrl);
+	wxGetApp().UpdateDarkUI(y_textctrl);
+	wxGetApp().UpdateDarkUI(static_text_x, false, true);
+	wxGetApp().UpdateDarkUI(static_text_y, false, true);
 
 	temp->Add(static_text_x, 0, wxALIGN_CENTER_VERTICAL, 0);
 	temp->Add(x_textctrl);
@@ -1759,6 +1836,15 @@ void PointCtrl::msw_rescale()
         x_textctrl->SetMinSize(field_size);
         y_textctrl->SetMinSize(field_size);
     }
+}
+
+void PointCtrl::sys_color_changed()
+{
+#ifdef _WIN32
+    for (wxSizerItem* item: sizer->GetChildren())
+        if (item->IsWindow())
+            wxGetApp().UpdateDarkUI(item->GetWindow());
+#endif
 }
 
 bool PointCtrl::value_was_changed(wxTextCtrl* win)
@@ -1799,8 +1885,12 @@ void PointCtrl::set_value(const boost::any& value, bool change_event)
 	const Vec2d *ptf = boost::any_cast<Vec2d>(&value);
 	if (!ptf)
 	{
-		ConfigOptionPoints* pts = boost::any_cast<ConfigOptionPoints*>(value);
-		pt = pts->values.at(0);
+        if (m_opt.type == coPoint) {
+            pt = boost::any_cast<ConfigOptionPoint*>(value)->value;
+        } else { // coPoints
+            ConfigOptionPoints* pts = boost::any_cast<ConfigOptionPoints*>(value);
+            pt = pts->values.at(0);
+        }
 	}
 	else
 		pt = *ptf;
@@ -1814,12 +1904,12 @@ boost::any& PointCtrl::get_value()
 		!y_textctrl->GetValue().ToDouble(&y))
 	{
 		set_value(m_value.empty() ? Vec2d(0.0, 0.0) : m_value, true);
-		show_error(m_parent, _L("Invalid numeric input."));
+        show_error(m_parent, _L("Invalid numeric input."));
 	}
 	else
 	if (m_opt.min > x || x > m_opt.max ||
 		m_opt.min > y || y > m_opt.max)
-	{		
+	{
 		if (m_opt.min > x) x = m_opt.min;
 		if (x > m_opt.max) x = m_opt.max;
 		if (m_opt.min > y) y = m_opt.min;
@@ -1838,11 +1928,13 @@ void StaticText::BUILD()
     if (m_opt.height >= 0) size.SetHeight(m_opt.height*m_em_unit);
     if (m_opt.width >= 0) size.SetWidth(m_opt.width*m_em_unit);
 
-    const wxString legend = wxString::FromUTF8(m_opt.get_default_value<ConfigOptionString>()->value.c_str());
+    const wxString legend = from_u8(m_opt.get_default_value<ConfigOptionString>()->value);
     auto temp = new wxStaticText(m_parent, wxID_ANY, legend, wxDefaultPosition, size, wxST_ELLIPSIZE_MIDDLE);
 	temp->SetFont(Slic3r::GUI::wxGetApp().normal_font());
 	temp->SetBackgroundStyle(wxBG_STYLE_PAINT);
     temp->SetFont(wxGetApp().bold_font());
+
+	wxGetApp().UpdateDarkUI(temp);
 
 	// 	// recast as a wxWindow to fit the calling convention
 	window = dynamic_cast<wxWindow*>(temp);
@@ -1885,7 +1977,7 @@ void SliderCtrl::BUILD()
 	m_slider->SetBackgroundStyle(wxBG_STYLE_PAINT);
  	wxSize field_size(40, -1);
 
-	m_textctrl = new wxTextCtrl(m_parent, wxID_ANY, wxString::Format("%d", m_slider->GetValue()/m_scale), 
+	m_textctrl = new wxTextCtrl(m_parent, wxID_ANY, wxString::Format("%d", m_slider->GetValue()/m_scale),
 								wxDefaultPosition, field_size);
 	m_textctrl->SetFont(Slic3r::GUI::wxGetApp().normal_font());
 	m_textctrl->SetBackgroundStyle(wxBG_STYLE_PAINT);
@@ -1935,5 +2027,3 @@ boost::any& SliderCtrl::get_value()
 
 } // GUI
 } // Slic3r
-
-

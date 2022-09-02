@@ -10,11 +10,12 @@
 
 #include <queue>
 #include <atomic>
+#include <mutex>
 #include <thread>
 #include <vector>
 #include <chrono>
 #include <condition_variable>
-#include <mutex>
+
 
 namespace Slic3r {
 
@@ -32,6 +33,8 @@ class Mouse3DController
 	// to copy the parameters.
 	struct Params
 	{
+        static constexpr double MinTranslationScale = 0.1;
+        static constexpr double MaxTranslationScale = 30.;
 		static constexpr double DefaultTranslationScale = 2.5;
         static constexpr double MaxTranslationDeadzone = 0.2;
         static constexpr double DefaultTranslationDeadzone = 0.0;
@@ -111,12 +114,12 @@ class Mouse3DController
 
 #if ENABLE_3DCONNEXION_DEVICES_DEBUG_OUTPUT
         Vec3d               get_first_vector_of_type(unsigned int type) const {
-            std::scoped_lock lock(m_input_queue_mutex);
+            std::scoped_lock<std::mutex> lock(m_input_queue_mutex);
             auto it = std::find_if(m_input_queue.begin(), m_input_queue.end(), [type](const QueueItem& item) { return item.type_or_buttons == type; });
             return (it == m_input_queue.end()) ? Vec3d::Zero() : it->vector;
         }
         size_t              input_queue_size_current() const { 
-        	std::scoped_lock lock(m_input_queue_mutex); 
+        	std::scoped_lock<std::mutex> lock(m_input_queue_mutex); 
         	return m_input_queue.size(); 
         }
         std::atomic<size_t> input_queue_max_size_achieved;
@@ -194,9 +197,7 @@ public:
 
     // Called by Win32 HID enumeration callback.
     void device_attached(const std::string &device);
-#if ENABLE_CTRL_M_ON_WINDOWS
     void device_detached(const std::string& device);
-#endif // ENABLE_CTRL_M_ON_WINDOWS
 
     // On Windows, the 3DConnexion driver sends out mouse wheel rotation events to an active application
     // if the application does not register at the driver. This is a workaround to ignore these superfluous

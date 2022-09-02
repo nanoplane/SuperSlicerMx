@@ -12,6 +12,7 @@
 
 namespace Slic3r {
 
+
 class AppConfig
 {
 public:
@@ -20,12 +21,45 @@ public:
 		Editor,
 		GCodeViewer
 	};
+	enum class EAppColorType : unsigned char
+	{
+		Platter,
+		Main,
+		Highlight,
+	};
+
+
+	typedef struct {
+		double r;       // a fraction between 0 and 1
+		double g;       // a fraction between 0 and 1
+		double b;       // a fraction between 0 and 1
+	} rgb;
+
+	typedef struct {
+		double h;       // angle in degrees
+		double s;       // a fraction between 0 and 1
+		double v;       // a fraction between 0 and 1
+	} hsv;
+
+	struct LayoutEntry {
+		std::string name;
+		std::string description;
+		boost::filesystem::path path;
+		Semver version;
+		LayoutEntry() {}
+		LayoutEntry(std::string name, std::string description, boost::filesystem::path path, Semver version) : name(name), description(description), path(path), version(version) {}
+	};
+	struct Tag {
+		ConfigOptionMode tag;
+		std::string name;
+		std::string description;
+		std::string color_hash;
+		Tag() {}
+		Tag(std::string name, std::string description, ConfigOptionMode tag, std::string color_hash) : name(name), description(description), tag(tag), color_hash(color_hash) {}
+	};
 
 	explicit AppConfig(EAppMode mode) :
-		m_dirty(false),
-		m_orig_version(Semver::invalid()),
-		m_mode(mode),
-		m_legacy_datadir(false)
+		m_mode(mode)
 	{
 		this->reset();
 	}
@@ -34,10 +68,13 @@ public:
 	void 			   	reset();
 	// Override missing or keys with their defaults.
 	void 			   	set_defaults();
+	void				init_ui_layout();
 
 	// Load the slic3r.ini from a user profile directory (or a datadir, if configured).
 	// return error string or empty strinf
 	std::string         load();
+	// Load from an explicit path.
+	std::string         load(const std::string &path);
 	// Store the slic3r.ini into a user profile directory (or a datadir, if configured).
 	void 			   	save();
 
@@ -63,12 +100,14 @@ public:
 		{ std::string value; this->get("", key, value); return value; }
 	void			    set(const std::string &section, const std::string &key, const std::string &value)
 	{
-#ifndef _NDEBUG
-		std::string key_trimmed = key;
-		boost::trim_all(key_trimmed);
-		assert(key_trimmed == key);
-		assert(! key_trimmed.empty());
-#endif // _NDEBUG
+#ifndef NDEBUG
+		{
+			std::string key_trimmed = key;
+			boost::trim_all(key_trimmed);
+			assert(key_trimmed == key);
+			assert(! key_trimmed.empty());
+		}
+#endif // NDEBUG
 		std::string &old = m_storage[section][key];
 		if (old != value) {
 			old = value;
@@ -99,7 +138,7 @@ public:
 	bool                has_section(const std::string &section) const
 		{ return m_storage.find(section) != m_storage.end(); }
 	const std::map<std::string, std::string>& get_section(const std::string &section) const
-		{ return m_storage.find(section)->second; }
+		{ auto it = m_storage.find(section); assert(it != m_storage.end()); return it->second; }
 	void set_section(const std::string &section, const std::map<std::string, std::string>& data)
 		{ m_storage[section] = data; }
 	void 				clear_section(const std::string &section)
@@ -125,6 +164,16 @@ public:
 
 	bool                get_show_overwrite_dialog() const { return get("show_overwrite_dialog") != "0"; }
 
+	// create color
+	uint32_t			create_color(float saturation, float value, EAppColorType color_template = EAppColorType::Main);
+	//utility color methods
+	static hsv			rgb2hsv(const rgb& in);
+	static rgb			hsv2rgb(const hsv& in);
+	static uint32_t		hex2int(const std::string& hex);
+	static std::string	int2hex(uint32_t int_color);
+	static rgb			int2rgb(uint32_t int_color);
+	static uint32_t		rgb2int(const rgb& rgb_color);
+
 	// reset the current print / filament / printer selections, so that 
 	// the  PresetBundle::load_selections(const AppConfig &config) call will select
 	// the first non-default preset when called.
@@ -132,6 +181,17 @@ public:
 
 	// Get the default config path from Slic3r::data_dir().
 	std::string			config_path();
+
+    // Get the current path to ui_layout directory
+    boost::filesystem::path  layout_config_path();
+    LayoutEntry              get_ui_layout();
+    std::vector<LayoutEntry> get_ui_layouts() { return m_ui_layout; }
+
+    //tags
+    std::vector<Tag>         tags() { return m_tags; }
+
+    // splashscreen
+    std::string              splashscreen(bool is_editor);
 
 	// Returns true if the user's data directory comes from before Slic3r 1.40.0 (no updating)
 	bool 				legacy_datadir() const { return m_legacy_datadir; }
@@ -169,6 +229,10 @@ public:
 	static const std::string SECTION_FILAMENTS;
     static const std::string SECTION_MATERIALS;
 
+#ifdef WIN32
+	static std::string appconfig_md5_hash_line(const std::string_view data);
+	static bool verify_config_file_checksum(boost::nowide::ifstream& ifs);
+#endif
 private:
 	template<typename T>
 	bool get_3dmouse_device_numeric_value(const std::string &device_name, const char *parameter_name, T &out) const 
@@ -180,7 +244,7 @@ private:
 	    auto it_val = it->second.find(parameter_name);
 	    if (it_val == it->second.end())
 	        return false;
-	    out = T(::atof(it_val->second.c_str()));
+        out = T(string_to_double_decimal_point(it_val->second));
 	    return true;
 	}
 
@@ -196,8 +260,14 @@ private:
 	Semver                                                      m_orig_version;
 	// Whether the existing version is before system profiles & configuration updating
 	bool                                                        m_legacy_datadir;
+    // ui_layout installed
+    std::vector<LayoutEntry>                                    m_ui_layout;
+    // tags installed
+	std::vector<Tag>                                            m_tags;
+	//splashscreen
+	std::pair<std::string,std::string>                          m_default_splashscreen;
 };
 
-}; // namespace Slic3r
+} // namespace Slic3r
 
 #endif /* slic3r_AppConfig_hpp_ */

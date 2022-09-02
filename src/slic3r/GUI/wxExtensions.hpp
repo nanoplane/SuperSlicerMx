@@ -22,6 +22,10 @@ void                msw_rescale_menu(wxMenu* menu);
 inline void         msw_rescale_menu(wxMenu* /* menu */) {}
 #endif /* __WXMSW__ */
 
+#ifdef _MSW_DARK_MODE
+#define _USE_CUSTOM_NOTEBOOK      1
+#endif
+
 wxMenuItem* append_menu_item(wxMenu* menu, int id, const wxString& string, const wxString& description,
     std::function<void(wxCommandEvent& event)> cb, const wxBitmap& icon, wxEvtHandler* event_handler = nullptr,
     std::function<bool()> const cb_condition = []() { return true;}, wxWindow* parent = nullptr, int insert_pos = wxNOT_FOUND);
@@ -44,6 +48,8 @@ wxMenuItem* append_menu_check_item(wxMenu* menu, int id, const wxString& string,
 void enable_menu_item(wxUpdateUIEvent& evt, std::function<bool()> const cb_condition, wxMenuItem* item, wxWindow* win);
 
 uint32_t color_from_hex(std::string hex);
+wxColour color_from_int(uint32_t colour);
+std::string color_to_hex(uint32_t color);
 
 class wxDialog;
 
@@ -52,11 +58,21 @@ void    msw_buttons_rescale(wxDialog* dlg, const int em_unit, const std::vector<
 int     em_unit(wxWindow* win);
 int     mode_icon_px_size();
 
+wxBitmap create_menu_bitmap(const std::string& bmp_name);
+
 wxBitmap create_scaled_bitmap(const std::string& bmp_name, wxWindow *win = nullptr, 
-    const int px_cnt = 16, const bool grayscale = false);
+    const int px_cnt = 16, const bool grayscale = false,
+    const std::string& new_color = std::string(), // color witch will used instead of orange
+    const bool menu_bitmap = false);
 
 std::vector<wxBitmap*> get_extruder_color_icons(bool thin_icon = false);
-void apply_extruder_selector(wxBitmapComboBox** ctrl,
+
+namespace Slic3r {
+namespace GUI {
+class BitmapComboBox;
+}
+}
+void apply_extruder_selector(Slic3r::GUI::BitmapComboBox** ctrl,
                              wxWindow* parent,
                              const std::string& first_item = "",
                              wxPoint pos = wxDefaultPosition,
@@ -135,6 +151,10 @@ public:
                     const std::string& icon_name = "",
                     const int px_cnt = 16, 
                     const bool grayscale = false);
+    ScalableBitmap(wxWindow* parent, 
+        const wxBitmap& bitmap,
+        const int px_cnt = 16) 
+        : m_bmp(bitmap), m_px_cnt(px_cnt) {};
 
     ~ScalableBitmap() {}
 
@@ -227,6 +247,8 @@ public:
     ~ScalableButton() {}
 
     void SetBitmap_(const ScalableBitmap& bmp);
+    void SetBitmap_(const wxBitmap& bmp);
+    bool SetBitmap_(const std::string& bmp_name, const int bmp_size = -1);
     void SetBitmapDisabled_(const ScalableBitmap &bmp);
     int  GetBitmapHeight();
     void UseDefaultBitmapDisabled();
@@ -244,74 +266,8 @@ private:
 
     // bitmap dimensions 
     int             m_px_cnt{ 16 };
+    bool            m_has_border {false};
 };
-
-
-// ----------------------------------------------------------------------------
-// ModeButton
-// ----------------------------------------------------------------------------
-
-class ModeButton : public ScalableButton
-{
-public:
-    ModeButton(
-        wxWindow*           parent,
-        wxWindowID          id,
-        const std::string&  icon_name = "",
-        const wxString&     mode = wxEmptyString,
-        const wxSize&       size = wxDefaultSize,
-        const wxPoint&      pos = wxDefaultPosition);
-
-    ModeButton(
-        wxWindow*           parent,
-        const wxString&     mode = wxEmptyString,
-        const std::string&  icon_name = "",
-        int                 px_cnt = 16);
-
-    ~ModeButton() {}
-
-    void Init(const wxString& mode);
-
-    void    OnButton(wxCommandEvent& event);
-    void    OnEnterBtn(wxMouseEvent& event) { focus_button(true); event.Skip(); }
-    void    OnLeaveBtn(wxMouseEvent& event) { focus_button(m_is_selected); event.Skip(); }
-
-    void    SetState(const bool state);
-
-protected:
-    void    focus_button(const bool focus);
-
-private:
-    bool        m_is_selected = false;
-
-    wxString    m_tt_selected;
-    wxString    m_tt_focused;
-};
-
-
-
-// ----------------------------------------------------------------------------
-// ModeSizer
-// ----------------------------------------------------------------------------
-
-class ModeSizer : public wxFlexGridSizer
-{
-public:
-    ModeSizer( wxWindow *parent, int hgap = 0);
-    ~ModeSizer() {}
-
-    void SetMode(const /*ConfigOptionMode*/int mode);
-
-    void set_items_flag(int flag);
-    void set_items_border(int border);
-
-    void msw_rescale();
-
-private:
-    std::vector<ModeButton*> m_mode_btns;
-};
-
-
 
 // ----------------------------------------------------------------------------
 // MenuWithSeparators

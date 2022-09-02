@@ -26,8 +26,21 @@ public:
 	Semver() : ver(semver_zero()) {}
 
 	Semver(int major, int minor, int counter, int patch,
-		boost::optional<const std::string&> metadata = boost::none,
-		boost::optional<const std::string&> prerelease = boost::none)
+		boost::optional<const std::string&> metadata, boost::optional<const std::string&> prerelease)
+		: ver(semver_zero())
+	{
+		semver_free(&ver);
+		ver.counter_size = 4;
+		ver.counters = new int[4];
+		ver.counters[0] = major;
+		ver.counters[1] = minor;
+		ver.counters[2] = counter;
+		ver.counters[3] = patch;
+		set_metadata(metadata);
+		set_prerelease(prerelease);
+	}
+
+	Semver(int major, int minor, int counter, int patch, const char *metadata = nullptr, const char *prerelease = nullptr)
 		: ver(semver_zero())
 	{
 		semver_free(&ver);
@@ -113,7 +126,9 @@ public:
 	//void set_counter(int count) { if (ver.counter_size > 2) ver.counters[2] = count; }
 	//void set_patch(int patch) { if (ver.counter_size > 3) ver.counters[3] = patch; }
 	void set_metadata(boost::optional<const std::string&> meta) { ver.metadata = meta ? strdup(*meta) : nullptr; }
+	void set_metadata(const char *meta) { ver.metadata = meta ? strdup(meta) : nullptr; }
 	void set_prerelease(boost::optional<const std::string&> pre) { ver.prerelease = pre ? strdup(*pre) : nullptr; }
+	void set_prerelease(const char *pre) { ver.prerelease = pre ? strdup(pre) : nullptr; }
 
 	// Comparison
 	bool operator<(const Semver &b)  const { return ::semver_compare(ver, b.ver) == -1; }

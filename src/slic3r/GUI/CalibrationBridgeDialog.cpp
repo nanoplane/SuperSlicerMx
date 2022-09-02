@@ -57,7 +57,7 @@ void CalibrationBridgeDialog::create_geometry(std::string setting_to_test, bool 
     if (!plat->new_project(L("Bridge calibration")))
         return;
 
-    GLCanvas3D::set_warning_freeze(true);
+    //GLCanvas3D::set_warning_freeze(true);
     bool autocenter = gui_app->app_config->get("autocenter") == "1";
     if (autocenter) {
         //disable auto-center for this calibration.
@@ -76,7 +76,7 @@ void CalibrationBridgeDialog::create_geometry(std::string setting_to_test, bool 
     std::vector<std::string> items;
     for (size_t i = 0; i < nb_items; i++)
         items.emplace_back((boost::filesystem::path(Slic3r::resources_dir()) / "calibration" / "bridge_flow" / "bridge_test.amf").string());
-    std::vector<size_t> objs_idx = plat->load_files(items, true, false, false);
+    std::vector<size_t> objs_idx = plat->load_files(items, true, false, false, false);
 
     assert(objs_idx.size() == nb_items);
     const DynamicPrintConfig* print_config = this->gui_app->get_tab(Preset::TYPE_FFF_PRINT)->get_config();
@@ -96,7 +96,7 @@ void CalibrationBridgeDialog::create_geometry(std::string setting_to_test, bool 
     float z_scale = nozzle_diameter / 0.4;
     //do scaling
     if (z_scale < 0.9 || 1.2 < z_scale) {
-        for (size_t i = 0; i < 5; i++)
+        for (size_t i = 0; i < nb_items; i++)
             model.objects[objs_idx[i]]->scale(1, 1, z_scale);
     } else {
         z_scale = 1;
@@ -120,9 +120,9 @@ void CalibrationBridgeDialog::create_geometry(std::string setting_to_test, bool 
     Vec2d bed_size = BoundingBoxf(bed_shape->values).size();
     Vec2d bed_min = BoundingBoxf(bed_shape->values).min;
     float offsety = 2 + 10 * 1 + extruder_clearance_radius->value + brim_width + (brim_width > extruder_clearance_radius->value ? brim_width - extruder_clearance_radius->value : 0);
-    model.objects[objs_idx[0]]->translate({ bed_min.x() + bed_size.x() / 2, bed_min.y() + bed_size.y() / 2, 0 });
+    model.objects[objs_idx[0]]->translate({ bed_min.x() + bed_size.x() / 2, bed_min.y() + bed_size.y() / 2, 2.5 * z_scale });
     for (int i = 1; i < nb_items; i++) {
-        model.objects[objs_idx[i]]->translate({ bed_min.x() + bed_size.x() / 2, bed_min.y() + bed_size.y() / 2 + (i % 2 == 0 ? -1 : 1) * offsety * ((i + 1) / 2), 0 });
+        model.objects[objs_idx[i]]->translate({ bed_min.x() + bed_size.x() / 2, bed_min.y() + bed_size.y() / 2 + (i % 2 == 0 ? -1 : 1) * offsety * ((i + 1) / 2), 2.5 * z_scale });
     }
     // if not enough space, forget about complete_objects
     if (bed_size.y() < offsety * (nb_items + 1))
@@ -143,7 +143,7 @@ void CalibrationBridgeDialog::create_geometry(std::string setting_to_test, bool 
         model.objects[objs_idx[i]]->config.set_key_value("brim_ears", new ConfigOptionBool(false));
         model.objects[objs_idx[i]]->config.set_key_value("perimeters", new ConfigOptionInt(2));
         model.objects[objs_idx[i]]->config.set_key_value("bottom_solid_layers", new ConfigOptionInt(2));
-        model.objects[objs_idx[i]]->config.set_key_value("gap_fill", new ConfigOptionBool(false));
+        model.objects[objs_idx[i]]->config.set_key_value("gap_fill_enabled", new ConfigOptionBool(false));
         model.objects[objs_idx[i]]->config.set_key_value(setting_to_test, new ConfigOptionPercent(start + (add ? 1 : -1) * i * step));
         model.objects[objs_idx[i]]->config.set_key_value("layer_height", new ConfigOptionFloat(nozzle_diameter / 2));
         model.objects[objs_idx[i]]->config.set_key_value("no_perimeter_unsupported_algo", new ConfigOptionEnum<NoPerimeterUnsupportedAlgo>(npuaBridges));
@@ -167,7 +167,7 @@ void CalibrationBridgeDialog::create_geometry(std::string setting_to_test, bool 
     }
 
     //update plater
-    GLCanvas3D::set_warning_freeze(false);
+    //GLCanvas3D::set_warning_freeze(false);
     this->gui_app->get_tab(Preset::TYPE_FFF_PRINT)->load_config(new_print_config);
     plat->on_config_change(new_print_config);
     plat->changed_objects(objs_idx);
