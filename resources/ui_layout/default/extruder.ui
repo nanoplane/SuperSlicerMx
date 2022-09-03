@@ -21,8 +21,11 @@ group:Mixing (for mixing extruder printers)
 		setting:label$:sidetext_width$1:idx:extruder_mix_ratios
 		setting:label_width$1:label$_:idx:extruder_mix_change_points
 	end_line
-	setting:idx:manage_tool_lifecycle
-	setting:idx:tool_create_gcode
+	line: Tool Lifecycle
+		setting:idx:manage_tool_lifecycle
+		setting:idx:tool_create_gcode
+		setting::idx:tool_release_gcode
+	end line
 group:Retraction
 	setting:idx:retract_length
 	setting:idx:retract_lift
