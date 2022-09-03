@@ -1642,39 +1642,61 @@ void PrintConfigDef::init_fff_params()
     def->is_vector_extruder = true;
     def->set_default_value(new ConfigOptionStrings{ "" });
 
-    // **mtr** add mix ratio
-                   
+    // mtr add mixer options
+    def = this->add("single_extruder_mixer", coBools);
+    def->label = L("Single Extruder Mixer");
+    def->category = OptionCategory::extruders;
+    def->tooltip = L("The extruder Mixes filaments proportionally into a single hot end.");
+    def->mode = comExpert;
+    def->is_vector_extruder = true;
+    def->set_default_value(new ConfigOptionBools { false });
+
+    def = this->add("mix_filaments_count", coInts);
+    def->label = L("Filaments in Mix");
+    def->category = OptionCategory::extruders;
+    def->tooltip = L("Number of filaments feeding the mixing hot-end");
+    def->mode = comExpert;
+    def->min = 2;
+    def->max = 8;
+    def->is_vector_extruder = true;
+    def->set_default_value(new ConfigOptionInts {4});
+
+
     def = this->add("extruder_mix_ratios", coStrings);
     def->label = L("Extruder Mix Ratios");
-    def->gui_type = "one_string";
     def->category = OptionCategory::extruders;
-    def->mode = comAdvanced;
-    def->width = 20;
+    def->mode = comExpert;
+    def->width = 12;
     def->multiline=true;
     def->height = 6;
     def->tooltip = L("This is used to send the command to setup a mix ratios for mixing extruders. "
                      "Each line consists of a colon delimited list of values that defines the extrusion ratios."
                      " If your hot end doesn't support mixing this is ignored");
     // Empty string means no mix ratio defined.
+    def->is_vector_extruder = true;
     def->set_default_value(new ConfigOptionStrings {"0.25:0.25:0.25:0.25"});
     
     def = this->add("extruder_gradient", coBools);
     def->label = L("Gradient");
-    def->mode = comAdvanced;
+    def->category = OptionCategory::extruders;
+    def->mode = comExpert;
     def->tooltip = L("Check this to interpret the mix ratios as gradient and transition points as size of the gradient");
+    def->is_vector_extruder = true;
     def->set_default_value(new ConfigOptionBools {false});
 
     def = this->add("extruder_mix_absolute", coBools);
     def->label = L("Height as Absolute");
-    def->mode = comAdvanced;
-    def->tooltip = L("Check this to interpret the height as absolut location rather than layer relative");
+    def->category = OptionCategory::extruders;
+    def->mode = comExpert;
+    def->tooltip = L("Check this to interpret the height as absolute location rather than layer relative");
+    def->is_vector_extruder = true;
     def->set_default_value(new ConfigOptionBools {false});
 
 
     def = this->add("extruder_mix_change_points", coStrings);
     def->label = L("transition points");
     def->category = OptionCategory::extruders;
-    def->mode = comAdvanced;
+    def->mode = comExpert;
     def->width = 6;
     def->height = 6;
     def->multiline = true;
@@ -1682,8 +1704,36 @@ void PrintConfigDef::init_fff_params()
     def->tooltip = L("Used to define where the mix ratio changes as a height(mm) above the platter "
                      "or as a height of \"this\" layer depending on the \"absolute\" checkbox");
     // Empty string means evenly distribute.
+    def->is_vector_extruder = true;
     def->set_default_value(new ConfigOptionStrings {""});
     
+    def = this->add("manage_tool_lifecycle", coBools);
+    def->label = L("Manage tool lifecycle");
+    def->category = OptionCategory::extruders;
+    def->tooltip = L("manage creation and deletion of associated extruder/tool on the printer");
+    def->mode = comExpert;
+    def->set_default_value(new ConfigOptionBools { false });
+
+    def = this->add("tool_create_gcode", coStrings);
+    def->category = OptionCategory::extruders;
+    def->label = L("Tool Creation gcode");
+    def->mode = comExpert;
+    //def->full_width = true;
+    def->width = 20;
+    def->tooltip = L("If Manage_Tool_lifecycle is set, gcode is included at the beginning of the gcode to dynamically create the associated tool for this virtual extruder using the M563 command.  This should be set to the drive, heater and fan components of that command");
+    // Empty string means no mix ratio defined.
+    def->set_default_value(new ConfigOptionStrings {"D0:1:2:3 H1 F1 "});
+
+    def = this->add("tool_release_gcode", coStrings);
+    def->label = L("Tool Release gcode");
+    def->category = OptionCategory::extruders;
+    def->mode = comExpert;
+    //def->full_width = true;
+    def->width = 20;
+    def->tooltip = L("If Manage_Tool_lifecycle is set, this gcode is included at the end of the gcode using the M563 command to release the associated tool for this virtual extruder. This should be set to dissasociate Drive and Heater ");
+    //(added mixing hot end support)
+    def->set_default_value(new ConfigOptionStrings {"D-1 H-1"});
+
 
     def = this->add("extruder_offset", coPoints);
     def->label = L("Extruder offset");
@@ -3420,29 +3470,7 @@ void PrintConfigDef::init_fff_params()
     def->mode = comExpert | comSuSi;
     def->set_default_value(new ConfigOptionFloat(1500));
 
-    def = this->add("manage_tool_lifecycle", coBools);
-    def->label = L("Manage tool lifecycle");
-    def->tooltip = L("manage creation and deletion of associated extruder/tool on the printer");
-    def->mode = comExpert;
-    def->set_default_value(new ConfigOptionBools { false });
-
-    def = this->add("tool_create_gcode", coStrings);
-    def->label = L("Tool Creation gcode");
-    def->gui_type = "one_string";
-    //def->full_width = true;
-    def->width = 20;
-    def->tooltip = L("If Manage_Tool_lifecycle is set, gcode is included at the beginning of the gcode to dynamically create the associated tool for this virtual extruder using the M563 command.  This should be set to the drive, heater and fan components of that command");
-    // Empty string means no mix ratio defined.
-    def->set_default_value(new ConfigOptionStrings {"D0:1:2:3 H1 F1 "});
-
-    def = this->add("tool_release_gcode", coStrings);
-    def->label = L("Tool Release gcode");
-    def->gui_type = "one_string";
-    //def->full_width = true;
-    def->width = 20;
-    def->tooltip = L("If Manage_Tool_lifecycle is set, this gcode is included at the end of the gcode using the M563 command to release the associated tool for this virtual extruder. This should be set to dissasociate Drive and Heater ");
-    //(added mixing hot end support)
-    def->set_default_value(new ConfigOptionStrings {"D-1 H-1"});
+     
     def = this->add("max_fan_speed", coInts);
     def->label = L("Max");
     def->full_label = L("Max fan speed");
@@ -3621,16 +3649,6 @@ void PrintConfigDef::init_fff_params()
     def->mode = comExpert | comPrusa;
     def->set_default_value(new ConfigOptionFloat(0));
                            
-   def = this->add("mix_filaments_count", coInts);
-   def->label = L("Filaments in Mix");
-   def->tooltip = L("Number of filaments feeding the mixing hot-end");
-   def->mode = comExpert;
-   def->min = 2;
-   def->max = 8;
-   def->set_default_value(new ConfigOptionInts {4});
-
-
-
     def = this->add("model_precision", coFloat);
     def->label = L("Model rounding precision");
     def->full_label = L("Model rounding precision");
@@ -4770,12 +4788,6 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvancedE | comPrusa;
     def->set_default_value(new ConfigOptionBool(false));
     
-   def = this->add("single_extruder_mixer", coBools);
-   def->label = L("Single Extruder Mixer");
-   def->tooltip = L("The extruder Mixes filaments proportionally into a single hot end.");
-   def->mode = comExpert;
-   def->set_default_value(new ConfigOptionBools { false });
-
 
     def = this->add("single_extruder_multi_material_priming", coBool);
     def->label = L("Prime all printing extruders");
@@ -6010,6 +6022,7 @@ void PrintConfigDef::init_extruder_option_keys()
         "single_extruder_mixer",
         "manage_tool_lifecycle",
         "tool_create_gcode",
+        "tool_release_gcode",
         "mix_filaments_count",
         "extruder_mix_ratios",
         "extruder_gradient",

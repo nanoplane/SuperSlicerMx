@@ -1506,7 +1506,8 @@ std::string MixingExtruderLayers::init_mixing_extruders(GCode &gcodegen, Print& 
     std::ostringstream gcode;
     
     if ((std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) ||
-        (std::set<uint8_t>{gcfMarlin}.count(print.config().gcode_flavor.value) > 0) ||
+        (std::set<uint8_t>{gcfMarlinLegacy}.count(print.config().gcode_flavor.value) > 0) ||
+        (std::set<uint8_t>{gcfMarlinFirmware}.count(print.config().gcode_flavor.value) > 0) ||
         (std::set<uint8_t>{gcfKlipper}.count(print.config().gcode_flavor.value) > 0)) {
         
         // first collect and translate the mix ratios, filling up the m_mix_refs vector... maybe make it a map.
@@ -1592,7 +1593,8 @@ void GCode::_init_multiextruders(Print& print, GCodeOutputStream& file, GCodeWri
 {
 
     //set tools and  temp for reprap
-    bool isMarlin = std::set<uint8_t>{gcfMarlin}.count(print.config().gcode_flavor.value) > 0;
+    bool isMarlin = (std::set<uint8_t>{gcfMarlinFirmware}.count(print.config().gcode_flavor.value) > 0) ||
+    (std::set<uint8_t>{gcfMarlinFirmware}.count(print.config().gcode_flavor.value) > 0);
     bool isRepRap = std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0;
     
     if (isRepRap) {
@@ -1606,7 +1608,7 @@ void GCode::_init_multiextruders(Print& print, GCodeOutputStream& file, GCodeWri
                     standby_temp);
             }
         }
-        _write_format(file, "\n"); // just to be clean
+        file.write_format("\n"); // just to be clean
     }
 }
 
@@ -2013,7 +2015,7 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
     // init (virtual) mixing extruders.  Also sets initial mix ratios for all mixing extruders.
     //need to do this before setting temps or extruding.
     // returns gcode for virtual tool creation and initial configuration
-    _write(file, this->m_mixer_layers.init_mixing_extruders(*this, print, tool_ordering));
+    file.write(this->m_mixer_layers.init_mixing_extruders(*this, print, tool_ordering));
 
     //init extruders
     if (!this->config().start_gcode_manual)
@@ -2285,7 +2287,7 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
         if (std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) {
             for (uint16_t tool_id : tool_ordering.all_extruders()) {
                 if (bool(print.config().manage_tool_lifecycle.get_at(tool_id))) {
-                    _write(file, m_writer.release_virtual_tool(tool_id));
+                    file.write( m_writer.release_virtual_tool(tool_id));
                 }
             }
         }
@@ -2675,17 +2677,13 @@ static bool custom_gcode_sets_bed_temperature(const std::string &gcode, const in
         for (; *ptr == ' ' || *ptr == '\t'; ++ ptr);
         if (*ptr == 'M') {
             char *endptr = nullptr;
-            int mgcode = int(strtol(ptr, &endptr, 10));
-            if (endptr != nullptr && endptr != ptr && 
-                (is_gcode ?
-                    // G10 found
-                    (mgcode == 10) :
-                // M104/M109 or M140/M190 found.
-                    (mgcode == mcode_set_temp_dont_wait || mgcode == mcode_set_temp_and_wait))) {
-				ptr = endptr;
-                if (! is_gcode)
-                    // Let the caller know that the custom M-code sets the temperature.
-                temp_set_by_gcode = true;
+            int mgcode = int(strtol(++ptr, &endptr, 10));
+            ptr = endptr;
+            // M104/M109 or M140/M190 found.
+            bool is_mcode = mgcode == mcode_set_temp_dont_wait || mgcode == mcode_set_temp_and_wait;
+            if (is_mcode) {
+                // so, it's a valid M code. look for tool and temp settings.
+                
                 // Now try to parse the temperature value.
                 // While not at the end of the line:
                 // skip the white stuff
@@ -6013,7 +6011,7 @@ std::string GCode::set_extruder(uint16_t extruder_id, double print_z, bool no_to
         check_add_eol(gcode);
         //check if it changed the temp
         int  temp_by_gcode = -1;
-        if (custom_gcode_sets_temperature(gcode, 104, 109, false, temp_by_gcode)) {
+        if (custom_gcode_sets_temperature(gcode, 104, 109, false, temp_by_gcode, extruder_id)) {
             //set writer
             m_writer.set_temperature(temp_by_gcode, false, extruder_id);
         }

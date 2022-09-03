@@ -102,8 +102,8 @@ public:
                     m_gcode += std::to_string(this->m_current_tool);
                 m_gcode += "\n";
             }
-            else if(m_gcode_flavor == gcfRepRap) ; // **mtr just do nothing for now..
-            else {
+        }
+        else {
             m_gcode += std::string("M900 K0\n");
         }
         return *this;

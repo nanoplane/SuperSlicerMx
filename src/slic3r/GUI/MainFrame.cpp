@@ -2411,7 +2411,7 @@ void MainFrame::load_configbundle(wxString file/* = wxEmptyString*/, bool from_p
     // Load the currently selected preset into the GUI, update the preset selection box.
 	wxGetApp().load_current_presets();
 
-    const auto message = wxString::Format(_L("%d presets successfully imported."), presets_imported);
+    const auto message = wxString::Format(_L("%d presets successfully imported."), (int)presets_imported);
     Slic3r::GUI::show_info(this, message, wxString("Info"));
 }
 

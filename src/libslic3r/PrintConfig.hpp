@@ -1064,7 +1064,7 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionString,              pause_print_gcode))
     ((ConfigOptionString,              template_custom_gcode))
 // mixing hot end additions **mtr**
-    ((ConfigOptionBools,               single_extruder_mixers))
+    ((ConfigOptionBools,               single_extruder_mixer))
     ((ConfigOptionBools,               manage_tool_lifecycle))
     ((ConfigOptionStrings,             tool_create_gcode))
     ((ConfigOptionInts,                mix_filaments_count))

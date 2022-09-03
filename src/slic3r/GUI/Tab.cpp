@@ -3378,6 +3378,9 @@ void TabPrinter::toggle_options()
         field = get_field("tool_create_gcode", i);
         if (field)
             field->toggle(flavor_reprap && manage_lifecycle);
+        field = get_field("tool_release_gcode", i);
+        if (field)
+            field->toggle(flavor_reprap && manage_lifecycle);
 
         // when using firmware retraction, firmware decides retraction length
         bool use_firmware_retraction = m_config->opt_bool("use_firmware_retraction");
