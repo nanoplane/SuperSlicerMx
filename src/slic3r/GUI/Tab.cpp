@@ -1828,6 +1828,7 @@ std::vector<Slic3r::GUI::PageShp> Tab::create_pages(std::string setting_type_nam
                                         }
                                     }
                                 }
+                                tab->build_unregular_pages(false); //mtr make sure we update visibility of the Single extruder MM setup page
                             }
                         }
                     });
