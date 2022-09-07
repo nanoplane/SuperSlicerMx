@@ -1828,6 +1828,7 @@ std::vector<Slic3r::GUI::PageShp> Tab::create_pages(std::string setting_type_nam
                                         }
                                     }
                                 }
+                                tab->build_unregular_pages(false); //mtr make sure we update visibility of the Single extruder MM setup page
                             }
                         }
                     });
@@ -3146,6 +3147,10 @@ void TabPrinter::build_unregular_pages(bool from_initial_build/* = false*/)
             }
         m_has_single_extruder_MM_page = false;
     }
+    if (m_has_single_extruder_MM_page) {
+        n_before_extruders++;
+    }
+    
     if (from_initial_build ||
         (m_extruders_count > 1 && m_config->opt_bool("single_extruder_multi_material") && !m_has_single_extruder_MM_page)) {
         // create a page, but pretend it's an extruder page, so we can add it to m_pages ourselves
