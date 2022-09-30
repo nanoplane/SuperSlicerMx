@@ -1082,6 +1082,15 @@ void Tab::reload_config()
 {
     if (m_active_page)
         m_active_page->reload_config();
+    //also reload scripted that aren't on the active page.
+    for (PageShp page : m_pages) {
+        if (page.get() != m_active_page) {
+            for (auto group : page->m_optgroups) {
+                // ask for activated the preset even if the gui isn't created, as the script may want to modify the conf.
+                group->update_script_presets(true);
+            }
+        }
+    }
 }
 
 void Tab::update_mode()
@@ -1795,7 +1804,12 @@ std::vector<Slic3r::GUI::PageShp> Tab::create_pages(std::string setting_type_nam
                         // Otherwise, boost::any_cast<size_t> causes an "unhandled unknown exception"
                         if (opt_key == "extruders_count" || opt_key == "single_extruder_multi_material") {
                             size_t extruders_count = size_t(boost::any_cast<int>(current_group->get_value("extruders_count")));
-                            tab->extruders_count_changed(extruders_count);
+                            if (opt_key == "extruders_count") {
+                                tab->extruders_count_changed(extruders_count);
+                            } else if (opt_key == "single_extruder_multi_material") {
+                                tab->build_unregular_pages(false);
+                                wxGetApp().sidebar().update_objects_list_extruder_column(extruders_count);
+                            }
                             init_options_list(); // m_options_list should be updated before UI updating
                             update_dirty();
                             if (opt_key == "single_extruder_multi_material") { // the single_extruder_multimaterial was added to force pages
@@ -2121,35 +2135,17 @@ std::vector<Slic3r::GUI::PageShp> Tab::create_pages(std::string setting_type_nam
                         option.opt.max_literal = { boost::lexical_cast<double>(params[i].substr(12, params[i].size() - 12).c_str()), false };
 
                 } else if (is_script) {
-                    if (params[i] == "bool") {
-                        option.opt.type = coBool;
-                        option.opt.set_default_value(new ConfigOptionBool(false));
-                    } else if (boost::starts_with(params[i], "int")) {
-                        option.opt.type = coInt;
-                        option.opt.set_default_value(new ConfigOptionInt(0));
-                        fct_add_enum(params[i]);
-                    } else if (boost::starts_with(params[i], "float")) {
-                        option.opt.type = coFloat;
-                        option.opt.set_default_value(new ConfigOptionFloat(0.));
-                        fct_add_enum(params[i]);
-                    } else if (boost::starts_with(params[i], "percent")) {
-                        option.opt.type = coPercent;
-                        option.opt.set_default_value(new ConfigOptionPercent(0));
-                        fct_add_enum(params[i]);
-                    } else if (boost::starts_with(params[i], "float_or_percent")) {
-                        option.opt.type = coFloatOrPercent;
-                        option.opt.set_default_value(new ConfigOptionFloatOrPercent(0.f, false));
-                        fct_add_enum(params[i]);
-                    } else if (boost::starts_with(params[i], "string")) {
-                        option.opt.type = coString;
-                        option.opt.set_default_value(new ConfigOptionString(""));
-                        fct_add_enum(params[i]);
-                    } else if (params[i] == "bools") {
+                    //be careful, "floatX" has to deteted before "float".
+                    if (params[i] == "bools") {
                         option.opt.type = coBools;
                         option.opt.set_default_value(new ConfigOptionBools{ false });
                     } else if (boost::starts_with(params[i], "ints")) {
                         option.opt.type = coInts;
                         option.opt.set_default_value(new ConfigOptionInts{ 0 });
+                        fct_add_enum(params[i]);
+                    } else if (boost::starts_with(params[i], "floats_or_percents")) {
+                        option.opt.type = coFloatsOrPercents;
+                        option.opt.set_default_value(new ConfigOptionFloatsOrPercents{ FloatOrPercent{0.f, false} });
                         fct_add_enum(params[i]);
                     } else if (boost::starts_with(params[i], "floats")) {
                         option.opt.type = coFloats;
@@ -2159,13 +2155,32 @@ std::vector<Slic3r::GUI::PageShp> Tab::create_pages(std::string setting_type_nam
                         option.opt.type = coPercents;
                         option.opt.set_default_value(new ConfigOptionPercents{ 0 });
                         fct_add_enum(params[i]);
-                    } else if (boost::starts_with(params[i], "floats_or_percents")) {
-                        option.opt.type = coFloatsOrPercents;
-                        option.opt.set_default_value(new ConfigOptionFloatsOrPercents{ FloatOrPercent{0.f, false} });
-                        fct_add_enum(params[i]);
                     } else if (boost::starts_with(params[i], "strings")) {
                         option.opt.type = coStrings;
                         option.opt.set_default_value(new ConfigOptionString{ "" });
+                        fct_add_enum(params[i]);
+                    } else if (params[i] == "bool") {
+                        option.opt.type = coBool;
+                        option.opt.set_default_value(new ConfigOptionBool(false));
+                    } else if (boost::starts_with(params[i], "int")) {
+                        option.opt.type = coInt;
+                        option.opt.set_default_value(new ConfigOptionInt(0));
+                        fct_add_enum(params[i]);
+                    } else if (boost::starts_with(params[i], "float_or_percent")) {
+                        option.opt.type = coFloatOrPercent;
+                        option.opt.set_default_value(new ConfigOptionFloatOrPercent(0.f, false));
+                        fct_add_enum(params[i]);
+                    } else if (boost::starts_with(params[i], "float")) {
+                        option.opt.type = coFloat;
+                        option.opt.set_default_value(new ConfigOptionFloat(0.));
+                        fct_add_enum(params[i]);
+                    } else if (boost::starts_with(params[i], "percent")) {
+                        option.opt.type = coPercent;
+                        option.opt.set_default_value(new ConfigOptionPercent(0));
+                        fct_add_enum(params[i]);
+                    } else if (boost::starts_with(params[i], "string")) {
+                        option.opt.type = coString;
+                        option.opt.set_default_value(new ConfigOptionString(""));
                         fct_add_enum(params[i]);
                     } else if (boost::starts_with(params[i], "enum")) {
                         option.opt.type = coEnum;
@@ -2193,7 +2208,7 @@ std::vector<Slic3r::GUI::PageShp> Tab::create_pages(std::string setting_type_nam
             }
 
 
-            current_group->register_to_search(option.opt.opt_key, option.opt, id);
+            current_group->register_to_search(option.opt.opt_key, option.opt, id, false);
             //if (need_to_notified_search)
             //    Search::OptionsSearcher::register_label_override(option.opt.opt_key, option.opt.label, option.opt.full_label, option.opt.tooltip);
 
@@ -2980,16 +2995,16 @@ void TabPrinter::milling_count_changed(size_t milling_count)
         is_count_changed = true;
     }
 
-    /* This function should be call in any case because of correct updating/rebuilding
-     * of unregular pages of a Printer Settings
-     */
-    build_unregular_pages(false);
+    if (is_count_changed) {
+        /* This function should be call in any case because of correct updating/rebuilding
+         * of unregular pages of a Printer Settings
+         */
+        build_unregular_pages(false);
 
-    //no gui listing for now
-    //if (is_count_changed) {
-    //    on_value_change("milling_count", milling_count);
-    //    wxGetApp().sidebar().update_objects_list_milling_column(milling_count);
-    //}
+        //propagate change
+        on_value_change("milling_count", milling_count);
+        //wxGetApp().sidebar().update_objects_list_milling_column(milling_count);
+    }
 }
 
 void TabPrinter::append_option_line_kinematics(ConfigOptionsGroupShp optgroup, const std::string opt_key, const std::string override_sidetext)
@@ -3135,8 +3150,7 @@ void TabPrinter::build_unregular_pages(bool from_initial_build/* = false*/)
 
     n_before_extruders++; // kinematic page is always here
 
-    if (m_extruders_count_old == m_extruders_count ||
-        (m_has_single_extruder_MM_page && m_extruders_count == 1))
+    if (m_has_single_extruder_MM_page && (!m_config->opt_bool("single_extruder_multi_material") || m_extruders_count == 1))
     {
         // if we have a single extruder MM setup, add a page with configuration options:
         for (size_t i = 0; i < m_pages.size(); ++i) // first make sure it's not there already
@@ -3170,11 +3184,12 @@ void TabPrinter::build_unregular_pages(bool from_initial_build/* = false*/)
             page->clear();
         } else {
             m_pages.insert(m_pages.begin() + n_before_extruders, page);
-            n_before_extruders++;
             m_has_single_extruder_MM_page = true;
         }
         changed = true;
     }
+    if(m_has_single_extruder_MM_page)
+        n_before_extruders++;
 
     // Build missed extruder pages
     for (size_t extruder_idx = m_extruders_count_old; extruder_idx < m_extruders_count; ++extruder_idx) {
@@ -3282,8 +3297,10 @@ void TabPrinter::reload_config()
 
     // "extruders_count" doesn't update from the update_config(),
     // so update it implicitly
-    if (m_active_page && m_active_page->title() == "General")
+    if (m_active_page && m_active_page->get_field("extruders_count"))
         m_active_page->set_value("extruders_count", int(m_extruders_count));
+    if (m_active_page && m_active_page->get_field("milling_count"))
+        m_active_page->set_value("milling_count", int(m_milling_count));
 }
 
 void TabPrinter::activate_selected_page(std::function<void()> throw_if_canceled)
@@ -3292,8 +3309,10 @@ void TabPrinter::activate_selected_page(std::function<void()> throw_if_canceled)
 
     // "extruders_count" doesn't update from the update_config(),
     // so update it implicitly
-    if (m_active_page && m_active_page->title() == "General")
+    if (m_active_page && m_active_page->get_field("extruders_count"))
         m_active_page->set_value("extruders_count", int(m_extruders_count));
+    if (m_active_page && m_active_page->get_field("milling_count"))
+        m_active_page->set_value("milling_count", int(m_milling_count));
 }
 
 void TabPrinter::clear_pages()
@@ -4751,12 +4770,18 @@ void TabPrinter::cache_extruder_cnt()
         return;
 
     m_cache_extruder_count = m_extruders_count;
+    m_cache_milling_count = m_milling_count;
 }
 
 bool TabPrinter::apply_extruder_cnt_from_cache()
 {
     if (m_presets->get_edited_preset().printer_technology() == ptSLA)
         return false;
+
+    if (m_cache_milling_count > 0) {
+        m_presets->get_edited_preset().set_num_milling(m_cache_milling_count);
+        m_cache_milling_count = 0;
+    }
 
     if (m_cache_extruder_count > 0) {
         m_presets->get_edited_preset().set_num_extruders(m_cache_extruder_count);

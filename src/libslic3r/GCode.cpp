@@ -232,7 +232,7 @@ std::string Wipe::wipe(GCode& gcodegen, bool toolchange)
                     gcode += gcodegen.writer().set_speed(wipe_speed, "", gcodegen.enable_cooling_markers() ? ";_WIPE" : "");
                 gcode += gcodegen.writer().extrude_to_xy(
                     gcodegen.point_to_gcode(line.b),
-                    -dE,
+                    gcodegen.config().use_firmware_retraction? 0 : -dE,
                     "wipe and retract"
                 );
             }
@@ -576,6 +576,19 @@ std::vector<GCode::LayerToPrint> GCode::collect_layers_to_print(const PrintObjec
 
     std::vector<std::pair<double, double>> warning_ranges;
 
+    //check for max nozzle diameter
+    const std::vector<double>& nozzle_diameters = object.print()->config().nozzle_diameter.values;
+    std::set<uint16_t> exctruder_ids = object.object_extruders();
+    double max_nozzle = 0;
+    for (uint16_t id : exctruder_ids) {
+        max_nozzle = std::max(max_nozzle, nozzle_diameters[id]);
+    }
+    if (max_nozzle == 0)
+        max_nozzle = nozzle_diameters.front();
+    double top_cd = object.config().support_material_contact_distance.get_abs_value(max_nozzle);
+    double bottom_cd = object.config().support_material_bottom_contact_distance.value == 0. ? top_cd : object.config().support_material_bottom_contact_distance.get_abs_value(max_nozzle);
+    double raft_cd = object.config().raft_contact_distance.value;
+
     // Pair the object layers with the support layers by z.
     size_t idx_object_layer  = 0;
     size_t idx_support_layer = 0;
@@ -612,28 +625,34 @@ std::vector<GCode::LayerToPrint> GCode::collect_layers_to_print(const PrintObjec
         if ((layer_to_print.object_layer && layer_to_print.object_layer->has_extrusions())
             // Allow empty support layers, as the support generator may produce no extrusions for non-empty support regions.
          || (layer_to_print.support_layer /* && layer_to_print.support_layer->has_extrusions() */)) {
-            //check for max nozzle diameter
-            const std::vector<double>& nozzle_diameters = object.print()->config().nozzle_diameter.values;
-            std::set<uint16_t> exctruder_ids = object.object_extruders();
-            double max_nozzle = 0;
-            for (uint16_t id : exctruder_ids) {
-                max_nozzle = std::max(max_nozzle, nozzle_diameters[id]);
-            }
-            if (max_nozzle == 0)
-                max_nozzle = nozzle_diameters.front();
-
-            double top_cd = object.config().support_material_contact_distance.get_abs_value(max_nozzle);
-            double bottom_cd = object.config().support_material_bottom_contact_distance.value == 0. ? top_cd : object.config().support_material_bottom_contact_distance.get_abs_value(max_nozzle);
 
             double extra_gap = (layer_to_print.support_layer ? bottom_cd : top_cd);
+            if (object.config().raft_layers.value > 0 && layer_to_print.layer()->id() <= object.config().raft_layers.value) {
+                extra_gap = raft_cd;
+            }
+            if (object.config().support_material_contact_distance_type.value == SupportZDistanceType::zdNone) {
+                extra_gap = layer_to_print.layer()->height;
+            } else if (object.config().support_material_contact_distance_type.value == SupportZDistanceType::zdFilament) {
+                //compute the height of bridge.
+                if (layer_to_print.layer()->id() > 0 && !layer_to_print.layer()->regions().empty()) {
+                    extra_gap += layer_to_print.layer()->regions().front()->bridging_flow(FlowRole::frSolidInfill).height();
+                } else {
+                    extra_gap += layer_to_print.layer()->height;
+                }
+            } else { //SupportZDistanceType::zdPlane
+                extra_gap += layer_to_print.layer()->height;
+            }
 
-            double maximal_print_z = (last_extrusion_layer ? last_extrusion_layer->print_z() : 0.)
-                + layer_to_print.layer()->height
-                + std::max(0., extra_gap);
+            double maximal_print_z = check_z_step(
+                (last_extrusion_layer ? last_extrusion_layer->print_z() : 0.) + std::max(0., extra_gap),
+                object.print()->config().z_step);
             // Negative support_contact_z is not taken into account, it can result in false positives in cases
             // where previous layer has object extrusions too (https://github.com/prusa3d/PrusaSlicer/issues/2752)
 
-            if (has_extrusions && !object.print()->config().allow_empty_layers && layer_to_print.print_z() > maximal_print_z + 2. * EPSILON)
+            if (has_extrusions && !object.print()->config().allow_empty_layers && layer_to_print.print_z() > maximal_print_z + 2. * EPSILON
+                //don't check for raft layers: there is an empty space between the last raft and the first layer
+                //&& (object.config().raft_layers.value == 0 || (layer_to_print.object_layer && layer_to_print.object_layer->id() > object.config().raft_layers.value)) 
+                )
                 warning_ranges.emplace_back(std::make_pair((last_extrusion_layer ? last_extrusion_layer->print_z() : 0.), layers_to_print.back().print_z()));
         }
         // Remember last layer with extrusions.
@@ -1057,7 +1076,8 @@ namespace DoExport {
 	        // volumetric speed as the volumetric speed produced by printing the 
 	        // smallest cross-section at the maximum speed: any larger cross-section
 	        // will need slower feedrates.
-	        volumetric_speed = *std::min_element(mm3_per_mm.begin(), mm3_per_mm.end()) * print.config().max_print_speed.value;
+            double max_print_speed = print.config().get_computed_value("max_print_speed");
+            volumetric_speed = *std::min_element(mm3_per_mm.begin(), mm3_per_mm.end()) * max_print_speed;
 	        // limit such volumetric speed with max_volumetric_speed if set
 	        if (print.config().max_volumetric_speed.value > 0)
 	            volumetric_speed = std::min(volumetric_speed, print.config().max_volumetric_speed.value);
@@ -2423,14 +2443,14 @@ void GCode::process_layers(
 
     // The pipeline elements are joined using const references, thus no copying is performed.
     output_stream.find_replace_supress();
-    if (m_spiral_vase && m_find_replace)
-        tbb::parallel_pipeline(12, generator & spiral_vase & cooling & fan_mover & find_replace & output);
-    else if (m_spiral_vase)
-        tbb::parallel_pipeline(12, generator &  spiral_vase & cooling & fan_mover & output);
-    else if (m_find_replace)
-        tbb::parallel_pipeline(12, generator & cooling & fan_mover & find_replace & output);
-    else
-        tbb::parallel_pipeline(12, generator & cooling & fan_mover & output);
+    tbb::filter<void, GCode::LayerResult> pipeline_to_layerresult = generator;
+    if (m_spiral_vase)
+        pipeline_to_layerresult = pipeline_to_layerresult & spiral_vase;
+    tbb::filter<void, std::string> pipeline_to_string = pipeline_to_layerresult & cooling & fan_mover;
+    if (m_find_replace)
+        pipeline_to_string = pipeline_to_string & find_replace;
+    tbb::filter<void, void> full_pipeline = pipeline_to_string & output;
+    tbb::parallel_pipeline(12, full_pipeline);
     output_stream.find_replace_enable();
 }
 
@@ -2460,9 +2480,9 @@ void GCode::process_layers(
         });
     const auto spiral_vase = tbb::make_filter<GCode::LayerResult, GCode::LayerResult>(slic3r_tbb_filtermode::serial_in_order,
         [&spiral_vase = *this->m_spiral_vase.get()](GCode::LayerResult in)->GCode::LayerResult {
-            spiral_vase.enable(in.spiral_vase_enable);
-            return { spiral_vase.process_layer(std::move(in.gcode)), in.layer_id, in.spiral_vase_enable, in.cooling_buffer_flush };
-        });
+        spiral_vase.enable(in.spiral_vase_enable);
+        return { spiral_vase.process_layer(std::move(in.gcode)), in.layer_id, in.spiral_vase_enable, in.cooling_buffer_flush };
+    });
     const auto cooling = tbb::make_filter<GCode::LayerResult, std::string>(slic3r_tbb_filtermode::serial_in_order,
         [&cooling_buffer = *this->m_cooling_buffer.get()](GCode::LayerResult in)->std::string {
             return cooling_buffer.process_layer(std::move(in.gcode), in.layer_id, in.cooling_buffer_flush);
@@ -2497,14 +2517,14 @@ void GCode::process_layers(
 
     // The pipeline elements are joined using const references, thus no copying is performed.
     output_stream.find_replace_supress();
-    if (m_spiral_vase && m_find_replace)
-        tbb::parallel_pipeline(12, generator & spiral_vase & cooling & fan_mover & find_replace & output);
-    else if (m_spiral_vase)
-        tbb::parallel_pipeline(12, generator & spiral_vase & cooling & fan_mover & output);
-    else if (m_find_replace)
-        tbb::parallel_pipeline(12, generator & cooling & fan_mover & find_replace & output);
-    else
-        tbb::parallel_pipeline(12, generator & cooling & fan_mover & output);
+    tbb::filter<void, GCode::LayerResult> pipeline_to_layerresult = generator;
+    if (m_spiral_vase)
+        pipeline_to_layerresult = pipeline_to_layerresult & spiral_vase;
+    tbb::filter<void, std::string> pipeline_to_string = pipeline_to_layerresult & cooling & fan_mover;
+    if (m_find_replace)
+        pipeline_to_string = pipeline_to_string & find_replace;
+    tbb::filter<void, void> full_pipeline = pipeline_to_string & output;
+    tbb::parallel_pipeline(12, full_pipeline);
     output_stream.find_replace_enable();
 }
 
@@ -3203,7 +3223,7 @@ GCode::LayerResult GCode::process_layer(
             print.config().before_layer_gcode.value, m_writer.tool()->id(), &config)
             + "\n";
     }
-    // print z move to next layer UNLESS
+    // print z move to next layer UNLESS (HACK for superslicer#1775)
     // if it's going to the first layer, then we may want to delay the move in these condition:
     // there is no "after layer change gcode" and it's the first move from the unknown
     if (print.config().layer_gcode.value.empty() && !m_last_pos_defined && m_config.start_gcode_manual && (
@@ -3212,6 +3232,9 @@ GCode::LayerResult GCode::process_layer(
         ||   // or lift_min is higher than the first layer height.
          m_config.lift_min.value > layer.print_z
             )) {
+        // still do the retraction
+        gcode += m_writer.retract();
+        gcode += m_writer.reset_e();
         m_delayed_layer_change = this->change_layer(print_z); //HACK for superslicer#1775
     } else {
         //extra lift on layer change if multiple objects
@@ -3662,14 +3685,6 @@ GCode::LayerResult GCode::process_layer(
         }
     }
 
-#if 0
-    // Apply spiral vase post-processing if this layer contains suitable geometry
-    // (we must feed all the G-code into the post-processor, including the first
-    // bottom non-spiral layers otherwise it will mess with positions)
-    // we apply spiral vase at this stage because it requires a full layer.
-    // Just a reminder: A spiral vase mode is allowed for a single object per layer, single material print only.
-    if (m_spiral_vase)
-        gcode = m_spiral_vase->process_layer(std::move(gcode));
 
 
     //add milling post-process if enabled
@@ -3710,10 +3725,10 @@ GCode::LayerResult GCode::process_layer(
                 check_add_eol(gcode);
             }
 
-            gcode += "\n; began print:";
+            gcode += "\n; began milling:\n";
             for (const LayerToPrint& ltp : layers) {
                 if (ltp.object_layer != nullptr) {
-                    for (const PrintInstance& print_instance : ltp.object()->instances()){
+                    for (const PrintInstance& print_instance : ltp.object()->instances()) {
                         this->set_origin(unscale(print_instance.shift));
                         for (const LayerRegion* lr : ltp.object_layer->regions()) {
                             if (!lr->milling.empty()) {
@@ -3727,7 +3742,7 @@ GCode::LayerResult GCode::process_layer(
             }
 
             //switch to extruder
-            m_placeholder_parser.set("current_extruder", milling_extruder_id);
+            m_placeholder_parser.set("current_extruder", current_extruder_filament);
             // Append the filament start G-code.
             const std::string& end_mill_gcode = m_config.milling_toolchange_end_gcode.get_at(0);
             if (!end_mill_gcode.empty()) {
@@ -3750,6 +3765,14 @@ GCode::LayerResult GCode::process_layer(
         }
     }
 
+#if 0
+    // Apply spiral vase post-processing if this layer contains suitable geometry
+    // (we must feed all the G-code into the post-processor, including the first
+    // bottom non-spiral layers otherwise it will mess with positions)
+    // we apply spiral vase at this stage because it requires a full layer.
+    // Just a reminder: A spiral vase mode is allowed for a single object per layer, single material print only.
+    if (m_spiral_vase)
+        gcode = m_spiral_vase->process_layer(std::move(gcode));
 
     // Apply cooling logic; this may alter speeds.
     if (m_cooling_buffer)
@@ -4267,12 +4290,15 @@ std::string GCode::extrude_loop(const ExtrusionLoop &original_loop, const std::s
     std::cout << "\n";
 #endif
 
+    //useful var
+    const double nozzle_diam = (EXTRUDER_CONFIG_WITH_DEFAULT(nozzle_diameter, 0));
+
     //no-seam code path redirect
     if (original_loop.role() == ExtrusionRole::erExternalPerimeter && (original_loop.loop_role() & elrVase) != 0 && !this->m_config.spiral_vase
         //but not for the first layer
         && this->m_layer->id() > 0
         //exclude if min_layer_height * 2 > layer_height (increase from 2 to 3 because it's working but uses in-between)
-        && this->m_layer->height >= m_config.min_layer_height.get_abs_value(m_writer.tool()->id(), m_config.nozzle_diameter.get_at(m_writer.tool()->id())) * 2 - EPSILON
+        && this->m_layer->height >= m_config.min_layer_height.get_abs_value(m_writer.tool()->id(), nozzle_diam) * 2 - EPSILON
         ) {
         return extrude_loop_vase(original_loop, description, speed, lower_layer_edge_grid);
     }
@@ -4323,23 +4349,34 @@ std::string GCode::extrude_loop(const ExtrusionLoop &original_loop, const std::s
     // we discard it in that case
     ExtrusionPaths& building_paths = loop_to_seam.paths;
     if (m_enable_loop_clipping && m_writer.tool_is_extruder()) {
-        coordf_t clip_length = scale_(m_config.seam_gap.get_abs_value(m_writer.tool()->id(), EXTRUDER_CONFIG_WITH_DEFAULT(nozzle_diameter, 0)));
-        coordf_t min_clip_length = scale_(EXTRUDER_CONFIG_WITH_DEFAULT(nozzle_diameter, 0)) * 0.15;
+        coordf_t clip_length = scale_(m_config.seam_gap.get_abs_value(m_writer.tool()->id(), nozzle_diam));
+        coordf_t min_clip_length = scale_(nozzle_diam) * 0.15;
 
-        // get paths
-        ExtrusionPaths clipped;
-        if (clip_length > min_clip_length) {
-                // remove clip_length, like normally, but keep the removed part
-            clipped = clip_end(building_paths, clip_length);
-                // remove min_clip_length from the removed paths
-            clip_end(clipped, min_clip_length);
-                // ensure that the removed paths are travels
-            for (ExtrusionPath& ep : clipped)
-                ep.mm3_per_mm = 0;
-                // re-add removed paths as travels.
-            append(building_paths, clipped);
-        } else {
-            clip_end(building_paths, clip_length);
+        if (clip_length > full_loop_length / 4) {
+            //fall back to min_clip_length
+            if (clip_length > full_loop_length / 2) {
+                clip_length = min_clip_length;
+            } else {
+                float percent = (float(clip_length) / (float(full_loop_length) / 4)) - 1;
+                clip_length = clip_length * (1- percent) + min_clip_length * percent;
+            }
+        }
+        if (clip_length < full_loop_length / 4) {
+            // get paths
+            ExtrusionPaths clipped;
+            if (clip_length > min_clip_length) {
+                    // remove clip_length, like normally, but keep the removed part
+                clipped = clip_end(building_paths, clip_length);
+                    // remove min_clip_length from the removed paths
+                clip_end(clipped, min_clip_length);
+                    // ensure that the removed paths are travels
+                for (ExtrusionPath& ep : clipped)
+                    ep.mm3_per_mm = 0;
+                    // re-add removed paths as travels.
+                append(building_paths, clipped);
+            } else {
+                clip_end(building_paths, clip_length);
+            }
         }
     }
     if (building_paths.empty()) return "";
@@ -4347,8 +4384,8 @@ std::string GCode::extrude_loop(const ExtrusionLoop &original_loop, const std::s
 
     // apply the small perimeter speed
     if (speed == -1 && is_perimeter(paths.front().role()) && paths.front().role() != erThinWall) {
-        double min_length = scale_d(this->m_config.small_perimeter_min_length.get_abs_value(EXTRUDER_CONFIG_WITH_DEFAULT(nozzle_diameter, 0)));
-        double max_length = scale_d(this->m_config.small_perimeter_max_length.get_abs_value(EXTRUDER_CONFIG_WITH_DEFAULT(nozzle_diameter, 0)));
+        double min_length = scale_d(this->m_config.small_perimeter_min_length.get_abs_value(nozzle_diam));
+        double max_length = scale_d(this->m_config.small_perimeter_max_length.get_abs_value(nozzle_diam));
         if (full_loop_length < max_length) {
             if (full_loop_length <= min_length) {
                 speed = SMALL_PERIMETER_SPEED_RATIO_OFFSET;
@@ -4392,7 +4429,6 @@ std::string GCode::extrude_loop(const ExtrusionLoop &original_loop, const std::s
         Vec2d  next_pos = next_point.cast<double>();
         Vec2d  vec_dist = next_pos - current_pos;
         double vec_norm = vec_dist.norm();
-        const double nozzle_diam = (EXTRUDER_CONFIG_WITH_DEFAULT(nozzle_diameter, 0));
         const double setting_max_depth = (m_config.wipe_inside_depth.get_abs_value(m_writer.tool()->id(), nozzle_diam));
         coordf_t dist = scale_d(nozzle_diam) / 2;
         Point  pt = (current_pos + vec_dist * (2 * dist / vec_norm)).cast<coord_t>();
@@ -4436,6 +4472,16 @@ std::string GCode::extrude_loop(const ExtrusionLoop &original_loop, const std::s
     //wipe for External Perimeter (and not vase)
     if (paths.back().role() == erExternalPerimeter && m_layer != NULL && m_config.perimeters.value > 0 && paths.front().size() >= 2 && paths.back().polyline.points.size() >= 2
         && (m_enable_loop_clipping && m_writer.tool_is_extruder()) ) {
+        double dist_wipe_extra_perimeter = EXTRUDER_CONFIG_WITH_DEFAULT(wipe_extra_perimeter, 0);
+
+        //safeguard : if not possible to wipe, abord.
+        if (paths.size() == 1 && paths.front().size() <= 2) {
+            return gcode;
+        }
+        //TODO: abord if the wipe is too big for a mini loop (in a better way)
+        if (paths.size() == 1 && unscaled(paths.front().length()) < EXTRUDER_CONFIG_WITH_DEFAULT(wipe_extra_perimeter, 0) + nozzle_diam) {
+            return gcode;
+        }
         //get points for wipe
         Point prev_point = *(paths.back().polyline.points.end() - 2);       // second to last point
         // *(paths.back().polyline.points.end() - 2) this is the same as (or should be) as paths.front().first_point();
@@ -4449,8 +4495,8 @@ std::string GCode::extrude_loop(const ExtrusionLoop &original_loop, const std::s
 
         gcode += ";" + GCodeProcessor::reserved_tag(GCodeProcessor::ETags::Wipe_Start) + "\n";
         //extra wipe before the little move.
-        if (EXTRUDER_CONFIG_WITH_DEFAULT(wipe_extra_perimeter, 0) > 0) {
-            coordf_t wipe_dist = scale_(EXTRUDER_CONFIG_WITH_DEFAULT(wipe_extra_perimeter,0));
+        if (dist_wipe_extra_perimeter > 0) {
+            coordf_t wipe_dist = scale_(dist_wipe_extra_perimeter);
             ExtrusionPaths paths_wipe;
             m_wipe.reset_path();
             for (int i = 0; i < paths.size(); i++) {
@@ -4519,7 +4565,6 @@ std::string GCode::extrude_loop(const ExtrusionLoop &original_loop, const std::s
         Vec2d  next_pos = next_point.cast<double>();
         Vec2d  vec_dist = next_pos - current_pos;
         double vec_norm = vec_dist.norm();
-        const double nozzle_diam = (EXTRUDER_CONFIG_WITH_DEFAULT(nozzle_diameter, 0));
         const double setting_max_depth = (m_config.wipe_inside_depth.get_abs_value(m_writer.tool()->id(), nozzle_diam));
         coordf_t dist = scale_d(nozzle_diam) / 2;
         if (nozzle_diam != 0 && setting_max_depth > nozzle_diam * 0.55)
