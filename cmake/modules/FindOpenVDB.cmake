@@ -141,6 +141,7 @@ else()
   set (_required "")
 endif()
 
+
 # Include utility functions for version information
 include(${CMAKE_CURRENT_LIST_DIR}/OpenVDBUtils.cmake)
 
@@ -221,6 +222,8 @@ list(APPEND _OPENVDB_LIBRARYDIR_SEARCH_DIRS
   ${PC_OpenVDB_LIBRARY_DIRS}
   ${SYSTEM_LIBRARY_PATHS}
 )
+#mtr
+message(STATUS "openvdb search paths: ${_OPENVDB_LIBRARYDIR_SEARCH_DIRS}") 
 
 # Build suffix directories
 
@@ -247,7 +250,7 @@ foreach(COMPONENT ${OpenVDB_FIND_COMPONENTS})
     PATHS ${_OPENVDB_LIBRARYDIR_SEARCH_DIRS}
     PATH_SUFFIXES ${OPENVDB_PATH_SUFFIXES}
   )
-
+ 
   find_library(OpenVDB_${COMPONENT}_LIBRARY_DEBUG ${LIB_NAME}${OpenVDB_DEBUG_SUFFIX} lib${LIB_NAME}${OpenVDB_DEBUG_SUFFIX}
     PATHS ${_OPENVDB_LIBRARYDIR_SEARCH_DIRS}
     PATH_SUFFIXES ${OPENVDB_PATH_SUFFIXES}
@@ -261,7 +264,7 @@ foreach(COMPONENT ${OpenVDB_FIND_COMPONENTS})
 
     list(FIND CMAKE_CONFIGURATION_TYPES "Debug" _has_debug)
     
-    if(OpenVDB_${COMPONENT}_LIBRARY_RELEASE AND (NOT MSVC OR _has_debug LESS 0 OR OpenVDB_${COMPONENT}_LIBRARY_DEBUG))
+    if ((OpenVDB_${COMPONENT}_LIBRARY_RELEASE AND (NOT MSVC OR (_has_debug LESS 0))) OR OpenVDB_${COMPONENT}_LIBRARY_DEBUG)
       set(OpenVDB_${COMPONENT}_FOUND TRUE)
     else()
       set(OpenVDB_${COMPONENT}_FOUND FALSE)
@@ -270,7 +273,6 @@ foreach(COMPONENT ${OpenVDB_FIND_COMPONENTS})
     set(OpenVDB_${COMPONENT}_LIBRARY ${OpenVDB_${COMPONENT}_LIBRARY_RELEASE})
   else ()
     string(TOUPPER "${CMAKE_BUILD_TYPE}" _BUILD_TYPE)
-
     set(OpenVDB_${COMPONENT}_LIBRARY ${OpenVDB_${COMPONENT}_LIBRARY_${_BUILD_TYPE}})
 
     if (NOT OpenVDB_${COMPONENT}_LIBRARY)
