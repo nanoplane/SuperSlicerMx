@@ -26,7 +26,7 @@ the [documentation directory](doc/) for information about compilation.
 * Support for Mixing hotEnds/nozzles on printers. This includes setting mixing ratios for "extruders"/tools, 
 * support for gradients and layers on a per tool/extruder basis.
 * Updates to better handle Hot End heat management for mixing hotends and virtual extruder "tools"
-* 
+* 'Bubble Purge' to prevent clogging of mixing hotends
 ### Complete changelog [here](https://github.com/nanoplane/SuperSlicerMx/wiki)
 ### What are SuperSlicer main features? main new features/differences?
 
