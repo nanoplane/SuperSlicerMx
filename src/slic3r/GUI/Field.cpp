@@ -1358,7 +1358,9 @@ void Choice::set_selection()
     choice_ctrl* field = dynamic_cast<choice_ctrl*>(window);
 	switch (m_opt.type) {
 	case coEnum:{
-        field->SetSelection(m_opt.default_value->getInt());
+        int32_t val = boost::any_cast<int32_t>(m_opt.default_value->getInt());
+        val = idx_from_enum_value(val);
+        field->SetSelection(val);
 		break;
 	}
 	case coFloat:
