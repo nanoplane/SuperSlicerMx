@@ -2085,9 +2085,10 @@ void GLCanvas3D::reload_scene(bool refresh_immediately, bool force_full_scene_re
         unsigned int extruders_count = (unsigned int)m_config->option<ConfigOptionFloats>("nozzle_diameter")->values.size();
 
         bool wt = dynamic_cast<const ConfigOptionBool*>(m_config->option("wipe_tower"))->value;
+        bool bp = dynamic_cast<const ConfigOptionBool*>(m_config->option("wipe_mix_bubble"))->value;
         bool co = dynamic_cast<const ConfigOptionBool*>(m_config->option("complete_objects"))->value;
-
-        if (extruders_count > 1 && wt && !co) {
+        // **mtr count > 1 or bubble purge
+        if (((extruders_count > 1) || bp) && wt && !co) {
             // Height of a print (Show at least a slab)
             double height = std::max(m_model->bounding_box().max(2), 10.0);
 

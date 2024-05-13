@@ -1,24 +1,33 @@
 
+
 [![you can get this shield at shields.io](https://img.shields.io/discord/771316156203270154?color=7289da&logo=discord&logoColor=white)](https://github.com/supermerill/SuperSlicer/issues/611#issuecomment-907833287) [![you can get this shield at shields.io](https://img.shields.io/reddit/subreddit-subscribers/slic3r)](https://reddit.com/r/slic3r) [![you can get this shield at shields.io](https://img.shields.io/github/discussions/supermerill/superslicer)](https://github.com/supermerill/SuperSlicer/discussions)
 
 [![Packaging status](https://repology.org/badge/tiny-repos/superslicer.svg)](https://repology.org/project/superslicer/versions) [![you can get this shield at shields.io](https://img.shields.io/chocolatey/v/superslicer)](https://community.chocolatey.org/packages/superslicer) [![you can get this shield at shields.io](https://img.shields.io/homebrew/cask/v/superslicer)](https://formulae.brew.sh/cask/superslicer) [![you can get this shield at shields.io](https://img.shields.io/aur/version/superslicer)](https://aur.archlinux.org/packages/superslicer)
-# SuperSlicer
+# SuperSlicerMx
 
-**A PrusaSlicer fork (which is a slic3r fork)** (previously Slic3r++)
+**A SuperSlicer fork which is a PrusaSlicer fork (which is a slic3r fork)** (previously Slic3r++)
 
-Prebuilt Windows, Linux and macOS 64-bit releases are available through the [git releases page](https://github.com/supermerill/SuperSlicer/releases). The Linux & macOS builds aren't tested (by me), just compiled, so please report any bugs that may occur during use.  
+
+Prebuilt Windows, Linux and macOS 64-bit releases are available through the [git releases page](https://github.com/nanoplane/SuperSlicerMx/releases). please report any bugs that may occur during use.  
 For **installers**, check the badges above. Windows users can use chocolatey or scoop.  
-Nightly builds are available through the [git actions page](https://github.com/supermerill/SuperSlicer/actions). Click on the build for your platform and then on the archive name (`nightly_win64` or `SuperSlicer-gtk2.AppImage` or `nightly_macos.dmg`) in the "Artifacts" section in the top right corner.
+Nightly builds are available through the [git actions page](https://github.com/nanoplane/SuperSlicerMx/actions). Click on the build for your platform and then on the archive name (`nightly_win64` or `SuperSlicer-gtk2.AppImage` or `nightly_macos.dmg`) in the "Artifacts" section in the top right corner.
 
-SuperSlicer takes 3D models (STL, OBJ, AMF) and converts them into G-code
+SuperSlicerMx takes 3D models (STL, OBJ, AMF) and converts them into G-code
 instructions for FFF printers or PNG layers for mSLA 3D printers. It's compatible with any modern printer based on the RepRap toolchain which is running a firmware based on Marlin, Prusa, Klipper, etc.
 
-SuperSlicer is based on [PrusaSlicer](https://github.com/prusa3d/PrusaSlicer) by Prusa Research.
+SuperSlicerMx is based on SuperSlicer [SuperSlicer](https://github.com/supermerril/SuperSlicer)
+SuperSlicer is based on PrusaSlicer [PrusaSlicer](https://github.com/prusa3d/PrusaSlicer) by Prusa Research.
 PrusaSlicer is based on [Slic3r](https://github.com/Slic3r/Slic3r) by Alessandro Ranellucci and the RepRap community.
 
 See the [wiki](https://github.com/supermerill/SuperSlicer/wiki) and
 the [documentation directory](doc/) for information about compilation.
 
+### What are SuperSlicerMx main features? main new features/differences?
+* Support for Mixing hotEnds/nozzles on printers. This includes setting mixing ratios for "extruders"/tools, 
+* support for gradients and layers on a per tool/extruder basis.
+* Updates to better handle Hot End heat management for mixing hotends and virtual extruder "tools"
+* 
+### Complete changelog [here](https://github.com/nanoplane/SuperSlicerMx/wiki)
 ### What are SuperSlicer main features? main new features/differences?
 
 * Custom-made generated calibration tests.
@@ -39,7 +48,7 @@ the [documentation directory](doc/) for information about compilation.
 
 See the wiki for examples.
 
-### What are SuperSlicer / PrusaSlicer / Slic3r's main features?
+### What are SuperSlicerMx / SuperSlicer / PrusaSlicer / Slic3r's main features?
 
 Key features are:
 
@@ -97,6 +106,9 @@ Before sending patches and pull requests contact me (preferably through opening 
 changes. This way we can ensure that nobody wastes their time and no conflicts arise in development.
 
 ## License and attribution
+
+SuperSlicerMx is licensed under the _GNU Affero General Public License, version 3_.
+SuperSlicerMx is based on PrusaSlicer by PrusaResearch.
 
 SuperSlicer is licensed under the _GNU Affero General Public License, version 3_.
 SuperSlicer is based on PrusaSlicer by PrusaResearch.

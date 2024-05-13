@@ -1970,7 +1970,7 @@ void MainFrame::init_menubar_as_editor()
         append_menu_item(generationMenu, wxID_ANY, _(L("FreeCad python script")), _(L("Create an object by writing little easy script.")),
             [this](wxCommandEvent&) { wxGetApp().freecad_script_dialog(); });
         append_menu_item(generationMenu, wxID_ANY, _(L("Script help page")), _(L("How to use the FreeCad python script window.")),
-            [this](wxCommandEvent&) { wxLaunchDefaultBrowser("https://github.com/supermerill/SuperSlicer/wiki/FreePySCAD-script-window"); });
+            [this](wxCommandEvent&) { wxLaunchDefaultBrowser("https://github.com/nanoplane/SuperSlicerMx/wiki/FreePySCAD-script-window"); });
         generationMenu->AppendSeparator();
         append_menu_item(generationMenu, wxID_ANY, _(L("Mosaic from picture")), _(L("Create an mosaic-like tile with filament changes.")),
             [this](wxCommandEvent&) { wxGetApp().tiled_canvas_dialog(); });
@@ -2411,7 +2411,7 @@ void MainFrame::load_configbundle(wxString file/* = wxEmptyString*/, bool from_p
     // Load the currently selected preset into the GUI, update the preset selection box.
 	wxGetApp().load_current_presets();
 
-    const auto message = wxString::Format(_L("%d presets successfully imported."), presets_imported);
+    const auto message = wxString::Format(_L("%d presets successfully imported."), (int)presets_imported);
     Slic3r::GUI::show_info(this, message, wxString("Info"));
 }
 

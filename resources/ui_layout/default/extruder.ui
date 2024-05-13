@@ -1,4 +1,3 @@
-
 page:idx:Extruder:funnel
 group:Name and Size
 	setting:idx:tool_name
@@ -11,6 +10,22 @@ group:Offsets (for multi-extruder printers)
 	setting:idx:extruder_offset
 	setting:idx:extruder_temperature_offset
 	setting:idx:extruder_fan_offset
+group:Mixing (for mixing extruder printers)
+	setting:idx:single_extruder_mixer
+	line: Filaments in Mix
+		setting:label$:idx:mix_filaments_count
+		setting:label_width$1:idx:extruder_gradient
+		setting:idx:extruder_mix_absolute
+	end_line
+	line: Mix Ratios
+		setting:label$:sidetext_width$1:idx:extruder_mix_ratios
+		setting:label_width$1:label$_:idx:extruder_mix_change_points
+	end_line
+	line: Tool Lifecycle
+		setting:idx:manage_tool_lifecycle
+		setting:idx:tool_create_gcode
+		setting::idx:tool_release_gcode
+	end line
 group:Retraction
 	setting:idx:retract_length
 	setting:idx:retract_lift

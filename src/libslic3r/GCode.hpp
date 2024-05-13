@@ -119,6 +119,41 @@ public:
     static const std::vector<std::string>& get() { return Colors; }
 };
 
+//initialized with the option string for a specific change point
+// converts it to specific floating point mix ratios and a specific heights, starting at the bottom.
+class ExtruderMixAndChangePts
+{
+    // min and max height are the first layer height and the top layer height of the objects being printed.
+public:
+    ExtruderMixAndChangePts(int num_filaments, std::string ratio, std::string change_point,
+                            bool gradient, bool absolute, double min_height, double max_height);
+    
+    std::vector<double> get_layer_mix_ratio(double height);
+    bool is_absolute() {return m_absolute;}
+    bool is_gradient() {return m_gradient;}
+private:
+    bool m_gradient;
+    bool m_absolute;
+    // vector of height to mix ratio values
+    std::vector<std::pair<double, std::vector<double>>>  m_mix_ratio_map;
+};
+
+// tracks and supports adjusting the mix ratios for all active extruders.
+class MixingExtruderLayers
+{
+public:
+    std::string init_mixing_extruders( GCode &gcodegen, Print& print, ToolOrdering& tool_ordering);
+    std::vector<double> layer_mix_change(int tool_id, double z, bool &needs_change);
+private:
+    struct Mixer {
+        Mixer() : mix_points(nullptr) {}
+        ExtruderMixAndChangePts * mix_points;
+        std::vector<double>   last_mix_values;
+    };
+    // a map containing Mixer records per extruder.
+    std::map<int, Mixer *> m_mix_map;
+};
+
 class GCode : ExtrusionVisitorConst  {
 public:        
     GCode() : 
@@ -195,6 +230,8 @@ private:
     public:
         GCodeOutputStream(FILE* f, GCodeProcessor& processor, GCode& gcodegen) : f(f), m_processor(processor), m_gcodegen(gcodegen) {}
         ~GCodeOutputStream() { this->close(); }
+
+    void            _init_multiextruders(FILE* file, Print& print, GCodeWriter& writer, ToolOrdering& tool_ordering, const std::string& custom_gcode);
 
         // Set a find-replace post-processor to modify the G-code before GCodePostProcessor.
         // It is being set to null inside process_layers(), because the find-replace process
@@ -384,6 +421,9 @@ private:
     std::string     set_extruder(uint16_t extruder_id, double print_z, bool no_toolchange = false);
     std::string     toolchange(uint16_t extruder_id, double print_z);
 
+    // for mixing hot-end support with gradients and layers.
+    MixingExtruderLayers        m_mixer_layers;
+
     // Cache for custom seam enforcers/blockers for each layer.
     SeamPlacer                          m_seam_placer;
 
@@ -482,6 +522,8 @@ private:
     // as the retraction/unretraction can be written after the start/end of the algoruihtmblock, it has to be delayed.
     std::string m_gcode_label_objects_start;
     std::string m_gcode_label_objects_end;
+    
+    
     void _add_object_change_labels(std::string &gcode);
 
     bool m_silent_time_estimator_enabled;
@@ -518,6 +560,7 @@ private:
 
     friend class Wipe;
     friend class WipeTowerIntegration;
+    friend class ExtruderMixer;
 };
 
 std::vector<const PrintInstance*> sort_object_instances_by_model_order(const Print& print);

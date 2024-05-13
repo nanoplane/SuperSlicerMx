@@ -1063,12 +1063,22 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionString,              color_change_gcode))
     ((ConfigOptionString,              pause_print_gcode))
     ((ConfigOptionString,              template_custom_gcode))
+// mixing hot end additions **mtr**
+    ((ConfigOptionBools,               single_extruder_mixer))
+    ((ConfigOptionBools,               manage_tool_lifecycle))
+    ((ConfigOptionStrings,             tool_create_gcode))
+    ((ConfigOptionInts,                mix_filaments_count))
+    ((ConfigOptionStrings,             extruder_mix_ratios))
+    ((ConfigOptionStrings,             extruder_mix_change_points))
+    ((ConfigOptionBools,               extruder_gradient))
+    ((ConfigOptionBools,               extruder_mix_absolute))
 
 )
 #ifdef HAS_PRESSURE_EQUALIZER
     ((ConfigOptionFloat, max_volumetric_extrusion_rate_slope_positive))
     ((ConfigOptionFloat, max_volumetric_extrusion_rate_slope_negative))
 #endif
+
 
 static inline std::string get_extrusion_axis(const GCodeConfig& cfg)
 {
@@ -1202,6 +1212,13 @@ PRINT_CONFIG_CLASS_DERIVED_DEFINE(
     ((ConfigOptionFloats,               wiping_volumes_extruders))
     ((ConfigOptionFloat,                z_offset))
     ((ConfigOptionFloat,                init_z_rotate))
+// Wipe Mix options
+    ((ConfigOptionBool,                wipe_mix_backflow))
+    ((ConfigOptionBool,                wipe_mix_bubble))
+    ((ConfigOptionFloat,               wipe_mix_bubble_volume))
+    ((ConfigOptionInt,                 wipe_mix_bubble_layers))
+    ((ConfigOptionBool,                wipe_mix_two_stage))
+    ((ConfigOptionFloat,               wipe_mix_backflow_volume))
 
 )
 

@@ -8,7 +8,7 @@ PRODUCTVERSION @SLIC3R_RC_VERSION@
   {
    VALUE "CompanyName", "slic3r"
    VALUE "FileDescription", "@SLIC3R_APP_NAME@"
-   VALUE "FileVersion", "@SLIC3R_BUILD_ID@"
+   VALUE "FileVersion", "@SLIC3R_RC_VERSION_DOTS@"
    VALUE "ProductName", "@SLIC3R_APP_NAME@"
    VALUE "ProductVersion", "@SLIC3R_BUILD_ID@"
    VALUE "InternalName", "@SLIC3R_APP_NAME@"

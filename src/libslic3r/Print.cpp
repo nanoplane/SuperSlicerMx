@@ -89,8 +89,16 @@ bool Print::invalidate_state_by_config_options(const ConfigOptionResolver& /* ne
         "extruder_clearance_height",
         "extruder_clearance_radius",
         "extruder_colour",
+        "single_extruder_mixer",
+        "extruder_mix_ratios",
+        "mix_filaments_count",
+        "extruder_gradient",
+        "extruder_mix_absolute",
+        "extruder_mix_change_points",
+        "manage_tool_lifecycle",
+        "tool_create_gcode",
         "extruder_offset",
-        "extruder_fan_offset"
+        "extruder_fan_offset",
         "extruder_temperature_offset",
         "extrusion_multiplier",
         "fan_always_on",
@@ -1462,7 +1470,7 @@ bool Print::has_wipe_tower() const
     return 
         ! m_config.spiral_vase.value &&
         m_config.wipe_tower.value && 
-        m_config.nozzle_diameter.values.size() > 1;
+        ((m_config.nozzle_diameter.values.size() > 1) || m_config.wipe_mix_bubble);
 }
 
 const WipeTowerData& Print::wipe_tower_data(size_t extruders_cnt, double nozzle_diameter) const
@@ -1473,7 +1481,7 @@ const WipeTowerData& Print::wipe_tower_data(size_t extruders_cnt, double nozzle_
         float width = float(m_config.wipe_tower_width);
 		float unscaled_brim_width = m_config.wipe_tower_brim_width.get_abs_value(nozzle_diameter);
 
-        const_cast<Print*>(this)->m_wipe_tower_data.depth = (900.f/width) * float(extruders_cnt - 1);
+        const_cast<Print*>(this)->m_wipe_tower_data.depth = (300.f/width) * (float(extruders_cnt - 1) + (m_config.wipe_mix_bubble ? 1:0));
         const_cast<Print*>(this)->m_wipe_tower_data.brim_width = unscaled_brim_width;
     }
 

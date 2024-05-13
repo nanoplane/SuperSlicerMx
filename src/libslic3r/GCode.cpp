@@ -232,7 +232,7 @@ std::string Wipe::wipe(GCode& gcodegen, bool toolchange)
                     gcode += gcodegen.writer().set_speed(wipe_speed, "", gcodegen.enable_cooling_markers() ? ";_WIPE" : "");
                 gcode += gcodegen.writer().extrude_to_xy(
                     gcodegen.point_to_gcode(line.b),
-                    -dE,
+                    gcodegen.config().use_firmware_retraction? 0 : -dE,
                     "wipe and retract"
                 );
             }
@@ -526,6 +526,7 @@ std::string WipeTowerIntegration::post_process_wipe_tower_moves(const WipeTower:
                     gcode += append_tcr(gcodegen, m_tool_changes[m_layer_idx][m_tool_change_idx++], extruder_id, wipe_tower_z);
                     m_last_wipe_tower_print_z = wipe_tower_z;
                 }
+
             }
         }
         return gcode;
@@ -575,6 +576,19 @@ std::vector<GCode::LayerToPrint> GCode::collect_layers_to_print(const PrintObjec
 
     std::vector<std::pair<double, double>> warning_ranges;
 
+    //check for max nozzle diameter
+    const std::vector<double>& nozzle_diameters = object.print()->config().nozzle_diameter.values;
+    std::set<uint16_t> exctruder_ids = object.object_extruders();
+    double max_nozzle = 0;
+    for (uint16_t id : exctruder_ids) {
+        max_nozzle = std::max(max_nozzle, nozzle_diameters[id]);
+    }
+    if (max_nozzle == 0)
+        max_nozzle = nozzle_diameters.front();
+    double top_cd = object.config().support_material_contact_distance.get_abs_value(max_nozzle);
+    double bottom_cd = object.config().support_material_bottom_contact_distance.value == 0. ? top_cd : object.config().support_material_bottom_contact_distance.get_abs_value(max_nozzle);
+    double raft_cd = object.config().raft_contact_distance.value;
+
     // Pair the object layers with the support layers by z.
     size_t idx_object_layer  = 0;
     size_t idx_support_layer = 0;
@@ -611,28 +625,34 @@ std::vector<GCode::LayerToPrint> GCode::collect_layers_to_print(const PrintObjec
         if ((layer_to_print.object_layer && layer_to_print.object_layer->has_extrusions())
             // Allow empty support layers, as the support generator may produce no extrusions for non-empty support regions.
          || (layer_to_print.support_layer /* && layer_to_print.support_layer->has_extrusions() */)) {
-            //check for max nozzle diameter
-            const std::vector<double>& nozzle_diameters = object.print()->config().nozzle_diameter.values;
-            std::set<uint16_t> exctruder_ids = object.object_extruders();
-            double max_nozzle = 0;
-            for (uint16_t id : exctruder_ids) {
-                max_nozzle = std::max(max_nozzle, nozzle_diameters[id]);
-            }
-            if (max_nozzle == 0)
-                max_nozzle = nozzle_diameters.front();
-
-            double top_cd = object.config().support_material_contact_distance.get_abs_value(max_nozzle);
-            double bottom_cd = object.config().support_material_bottom_contact_distance.value == 0. ? top_cd : object.config().support_material_bottom_contact_distance.get_abs_value(max_nozzle);
 
             double extra_gap = (layer_to_print.support_layer ? bottom_cd : top_cd);
+            if (object.config().raft_layers.value > 0 && layer_to_print.layer()->id() <= object.config().raft_layers.value) {
+                extra_gap = raft_cd;
+            }
+            if (object.config().support_material_contact_distance_type.value == SupportZDistanceType::zdNone) {
+                extra_gap = layer_to_print.layer()->height;
+            } else if (object.config().support_material_contact_distance_type.value == SupportZDistanceType::zdFilament) {
+                //compute the height of bridge.
+                if (layer_to_print.layer()->id() > 0 && !layer_to_print.layer()->regions().empty()) {
+                    extra_gap += layer_to_print.layer()->regions().front()->bridging_flow(FlowRole::frSolidInfill).height();
+                } else {
+                    extra_gap += layer_to_print.layer()->height;
+                }
+            } else { //SupportZDistanceType::zdPlane
+                extra_gap += layer_to_print.layer()->height;
+            }
 
-            double maximal_print_z = (last_extrusion_layer ? last_extrusion_layer->print_z() : 0.)
-                + layer_to_print.layer()->height
-                + std::max(0., extra_gap);
+            double maximal_print_z = check_z_step(
+                (last_extrusion_layer ? last_extrusion_layer->print_z() : 0.) + std::max(0., extra_gap),
+                object.print()->config().z_step);
             // Negative support_contact_z is not taken into account, it can result in false positives in cases
             // where previous layer has object extrusions too (https://github.com/prusa3d/PrusaSlicer/issues/2752)
 
-            if (has_extrusions && !object.print()->config().allow_empty_layers && layer_to_print.print_z() > maximal_print_z + 2. * EPSILON)
+            if (has_extrusions && !object.print()->config().allow_empty_layers && layer_to_print.print_z() > maximal_print_z + 2. * EPSILON
+                //don't check for raft layers: there is an empty space between the last raft and the first layer
+                //&& (object.config().raft_layers.value == 0 || (layer_to_print.object_layer && layer_to_print.object_layer->id() > object.config().raft_layers.value)) 
+                )
                 warning_ranges.emplace_back(std::make_pair((last_extrusion_layer ? last_extrusion_layer->print_z() : 0.), layers_to_print.back().print_z()));
         }
         // Remember last layer with extrusions.
@@ -1056,7 +1076,8 @@ namespace DoExport {
 	        // volumetric speed as the volumetric speed produced by printing the 
 	        // smallest cross-section at the maximum speed: any larger cross-section
 	        // will need slower feedrates.
-	        volumetric_speed = *std::min_element(mm3_per_mm.begin(), mm3_per_mm.end()) * print.config().max_print_speed.value;
+            double max_print_speed = print.config().get_computed_value("max_print_speed");
+            volumetric_speed = *std::min_element(mm3_per_mm.begin(), mm3_per_mm.end()) * max_print_speed;
 	        // limit such volumetric speed with max_volumetric_speed if set
 	        if (print.config().max_volumetric_speed.value > 0)
 	            volumetric_speed = std::min(volumetric_speed, print.config().max_volumetric_speed.value);
@@ -1238,13 +1259,365 @@ std::vector<const PrintInstance*> sort_object_instances_by_model_order(const Pri
     return instances;
 }
 
+
+
+// forward declaration so I don't move code too much **mtr**
+static bool custom_gcode_sets_temperature(const std::string &gcode, const int mcode_set_temp_dont_wait, const int mcode_set_temp_and_wait, const bool include_g10, int &temp_out, int tool_id);
+
+// forward declaration so I don't move code too much **mtr**
+static bool custom_gcode_sets_bed_temperature(const std::string &gcode, const int mcode_set_temp_dont_wait, const int mcode_set_temp_and_wait, int &temp_out);
+
+
+// implementations for Mixing Extruder clases
+
+/*
+ * so the trick here is to parse the ratio arrays, convert to min_height - max_height range
+ * then parse change point array and create the mapping as vector of height to vector of mix ratio pairs
+ *
+ */
+ExtruderMixAndChangePts::ExtruderMixAndChangePts(int num_filaments, std::string ratios, std::string change_points,bool gradient, bool absolute, double min_height, double max_height)
+{
+    m_gradient = gradient;
+    m_absolute = absolute;
+    
+    const char *ptr = ratios.data();
+    
+    std::vector<std::vector<double>> mratios;
+    std::vector<double> val;
+    int fil = 0;
+    double total=0;
+    
+    // parse and normalize the ratios
+    while (*ptr != 0) {
+        char *endptr = nullptr;
+        double ratio = strtod(ptr, &endptr);
+        if (ptr != endptr) {
+            val.push_back(ratio);
+            total += ratio;
+            ++fil;
+        }
+        ptr = endptr;
+        // skip anything that isn't a ":" or the end of line or end of buffer
+        //for (; *ptr != ':' && *ptr != '\n' && *ptr != '\n' && *ptr != '\0'; ++ ptr);
+        for (; strchr(":\n\r\0", *ptr) == nullptr; ptr++);
+
+        if (fil > 0 && ((strchr("\r\n\0", *ptr) != nullptr)|| fil >= num_filaments)) {
+            if (fil < num_filaments) {
+                // not enought entries, make them up
+                for (int i =fil; i< num_filaments; i++) {
+                    val.push_back(0.0);
+                }
+            }
+            // Now adjust the values to be within the range of 0 to 1.0
+            for (int i=0; i < val.size(); i++) {
+                val[i] = val[i]/total;
+            }
+            mratios.push_back(val);
+            total = 0.0;
+            fil = 0;
+            val.clear();
+            // skip the rest of the line
+            //for(;strchr("\n\r\0",*ptr) == nullptr; ptr++) ;
+            // if we're done, leave now.
+            if (*ptr == '\0')
+                break;
+        } else
+            ptr++;
+        //skip any empty space and lines
+        for(;*ptr != '\0' && strchr(" \n\r\t", *ptr) != nullptr; ptr++) ;
+    }
+    
+    //ok, now transform and normalize the Height values
+    ptr = change_points.data();
+    std::vector<double> mheights;
+    
+    mheights.clear();
+    total = 0;
+    ptr = change_points.data();
+    
+    while (*ptr != '\0') {
+        char *endptr = nullptr;
+        double height = strtod(ptr, &endptr);
+        if (ptr != endptr) {
+            mheights.push_back(height);
+            ptr = endptr;
+        } else {
+            //empty line
+            mheights.push_back(-1);
+            ptr++;
+        }
+        // skip the rest of the line
+        for(;strchr("\n\r\0",*ptr) == nullptr; ptr++) ;
+        // skip line terminations
+        for (;*ptr == '\n' || *ptr == '\r'; ptr++) ;
+        // if we're done, leave now.
+        if (*ptr == '\0')
+            break;
+    }
+    
+    // trim or expand if need be, pushing -1 into new values
+    size_t rs = mratios.size();
+    size_t hs = mheights.size();
+    if ((hs) > rs) {
+        for (int i = rs; i < hs; i++) mheights.pop_back();
+    } else if ( hs  < rs) {
+        for (int i = hs; i < rs; i++) mheights.push_back(-1);
+    }
+    
+    // how many empties in the list
+    int empty_count = 0;
+    for (double i : mheights) {
+        empty_count += i < 0? 1 : 0;
+    }
+
+    // mheights are ordered from the top down still.
+    if (m_absolute) {
+        // height is an absolute height above the base.
+                    
+        double total_height = max_height - min_height;
+        // handle the top and bottom differently for Gradients
+        if (gradient) {
+            // if it's a gradient and the front mheight is blank, make the front mheight max_height.
+            // compute the top height if it's "blank" or adjust the available height if it's not
+            if (mheights.front() < 0) {
+                mheights.front() = max_height;
+                empty_count--;
+            } else {
+                mheights.front() = std::min(mheights.front(), total_height);
+                total_height -= max_height - mheights.front();
+            }
+            
+            // handle the bottom height if it's open or adjust the available height if it's not.
+            // if it's a gradient and the back mheight is blank, make it min_height
+            if (mheights.back() < 0) {
+                mheights.back() = min_height;
+                empty_count--;
+            } else {
+                mheights.back() = std::max(mheights.back(), min_height);
+                total_height -= mheights.back() - min_height;
+            }
+        } else {
+            // if not a gradient, just make sure the heights are within the range min_heigt to max_height
+            if (mheights.front() >= 0) {
+                mheights.front() = std::min(mheights.front(), total_height);
+            }
+            if (mheights.back() >= 0){
+                mheights.back() = std::max(mheights.back(), min_height);
+            } else {
+                mheights.back() = min_height;
+                empty_count--;
+            }
+        }
+
+
+        // so, now we need to divide up any blank space amongst the rows.
+        // We walk our way down the list, finding empty areas and divide it up evenly.  Also check for
+        // monotonicity
+        double ht = max_height;
+        double space_per_ht;
+        for (int i = 0; i < mheights.size() ; i++) {
+            if (mheights[i] < 0) {
+                // search for the next non-empty
+                int cnt = 2;
+                for (int j = i+1;  j < mheights.size(); j++ ) {
+                    if (mheights[j] < 0) {
+                        cnt++;
+                    } else {
+                        space_per_ht = (ht - mheights[j])/(cnt);
+                        break;
+                    }
+                }
+                mheights[i] = ht - space_per_ht;
+            } else {
+                mheights[i] = std::max(std::min(mheights[i], ht), mheights.back()); // going down?.
+            }
+            ht = mheights[i];
+        }
+    } else {
+        // height represents the space the transition should take that starts with the
+        // assosciated mix ratio.  This means any value in the top entry will always be a fixed color.
+        //
+            
+        // process and interpret the values.
+         
+        double total_height = max_height - min_height;
+        double ht_used = 0;
+        int mhsize = mheights.size();
+        double space_per_empty = 0;
+
+        // calc the height used
+        for (double ht : mheights) ht_used += ht >= 0 ? ht:0;
+        // limit it to < the total height.
+        ht_used = std::min(ht_used, total_height);
+        // calc the space per empty spot
+        space_per_empty = (total_height - ht_used)/ empty_count;
+        
+        // now calc/set the actual heights.
+        double ht = max_height;
+        for (int i = 0; i < mhsize; i++) {
+            if (mheights[i] < 0) {
+                mheights[i] = ht - space_per_empty;
+            } else {
+                mheights[i] = std::max(std::min(ht - mheights[i], ht), min_height); // always going down.
+            }
+            ht = mheights[i];
+        }
+    }
+    // now we pull it all together
+    for (int i = 0; i < mheights.size(); i++) {
+        m_mix_ratio_map.push_back(std::make_pair(mheights[i], mratios[i]));
+    }
+}
+
+// get the layer mix ratios for the current height
+std::vector<double> ExtruderMixAndChangePts:: get_layer_mix_ratio(double height)
+{
+    std::vector<double> rslt;
+    
+    // if we're below the bottom, return the bottom mix.
+    if (height <= m_mix_ratio_map.back().first)
+        return m_mix_ratio_map.back().second;
+    // if we're above the top, return the top mix
+    if (height >= m_mix_ratio_map.front().first)
+        return m_mix_ratio_map.front().second;
+    
+    //fancy, we're somewhere in the middle
+    for (int i = m_mix_ratio_map.size() - 1; i >= 0; i--) {
+        if (height < m_mix_ratio_map[i].first) {
+            if (m_gradient) {
+                // calculate a new vector<double> that contains the calculated proportional values.
+                std::vector<double> above = m_mix_ratio_map[i].second;
+                std::vector<double> below = m_mix_ratio_map[i + 1].second;
+                double fraction = (height - m_mix_ratio_map[i + 1].first) / (m_mix_ratio_map[i].first - m_mix_ratio_map[i+1].first);
+                for (int j=0; j < above.size(); j++) {
+                    rslt.push_back((below[j] + ((above[j] - below[j])*fraction)));
+                }
+                return rslt;
+
+            } else {
+                return m_mix_ratio_map[i+1].second;
+            }
+        }
+    }
+    return m_mix_ratio_map.front().second; // over the top.
+}
+
+// get the current mix ratios for the specified tool at the current height,
+//needs_change is set to true if it's different from the last layer checked.
+std::vector<double> MixingExtruderLayers::layer_mix_change(int tool_id, double z, bool &needs_change)
+{
+    std::vector<double> result;
+    needs_change = false;
+    auto search = m_mix_map.find(tool_id);
+    result = search->second->mix_points->get_layer_mix_ratio(z);
+    if (result != search->second->last_mix_values) {
+        needs_change = true;
+        m_mix_map[tool_id]->last_mix_values = result;
+    }
+    return result;
+        
+}
+
+
+// initialize and create virtual mixing extruders.  this needs to be done at the beginning before any tools are used
+// even before any custom G-Code is run.  note, currently only works for reprap GCode flavor
+std::string MixingExtruderLayers::init_mixing_extruders(GCode &gcodegen, Print& print, ToolOrdering& tool_ordering)
+{
+    std::ostringstream gcode;
+    
+    if ((std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) ||
+        (std::set<uint8_t>{gcfMarlinLegacy}.count(print.config().gcode_flavor.value) > 0) ||
+        (std::set<uint8_t>{gcfMarlinFirmware}.count(print.config().gcode_flavor.value) > 0) ||
+        (std::set<uint8_t>{gcfKlipper}.count(print.config().gcode_flavor.value) > 0)) {
+        
+        // first collect and translate the mix ratios, filling up the m_mix_refs vector... maybe make it a map.
+        // iterate through the extruders, generate the ExtruderMixAnChangePts objects adding them to
+        //the m_mix_refs map.
+        
+        
+        for (uint16_t tool_id : tool_ordering.all_extruders()) {
+            // If we're managing tool creation, we need to create them first
+            if (bool(print.config().manage_tool_lifecycle.get_at(tool_id))) {
+                std::string gen_tool_code = std::string(print.config().tool_create_gcode.get_at(tool_id));
+                std::string tool_name = std::string(print.config().tool_name.get_at(tool_id));
+                gcode << gcodegen.writer().create_virtual_tool(tool_id, gen_tool_code.c_str(), tool_name.c_str());
+                // if firmware extraction is set, we need to set that up..
+                if (bool(print.config().use_firmware_retraction)) {
+                    double length = print.config().retract_length.get_at(tool_id);
+                    double num_mix_filaments = print.config().mix_filaments_count.get_at(tool_id);
+                    double lift = print.config().retract_lift.get_at(tool_id);
+                    double speed = print.config().retract_speed.get_at(tool_id)*60; //mm/minute
+                    length /= num_mix_filaments;
+                    gcode << gcodegen.writer().set_tool_fimrware_retraction(tool_id, length, speed, lift);
+
+                }
+            }
+            // and if it's a mixing extruder, we need to set the mix ratio.
+            if (bool(print.config().single_extruder_mixer.get_at(tool_id))) {
+                std::string mix_ratios = std::string(print.config().extruder_mix_ratios.get_at(tool_id));
+                std::string change_points = std::string(print.config().extruder_mix_change_points.get_at(tool_id));
+                bool gradient = print.config().extruder_gradient.get_at(tool_id);
+                bool absolute = print.config().extruder_mix_absolute.get_at(tool_id);
+                int num_filaments = print.config().mix_filaments_count.get_at(tool_id);
+                double min_height = 0; // need to figure out what the "real" minimum height of the object is...
+                double max_height = 0;
+                // get the min and max heights for the assoicated objects..
+                BoundingBoxf3 global_bounding_box;
+                BoundingBoxf3 b_box;
+                // walk the list of objects calculating the bounding box for all objects that use
+                // the tool_id/extruder
+                for ( PrintObject *po : print.objects()) {
+                            // there's our extruder hiding in there...
+                    for (const PrintInstance &instance : po->instances()) {
+                        for (ModelVolume* mv :
+                             instance.model_instance->get_object()->volumes) {
+                            // default extruder is 0, all other start at 1 so subtract.
+                            uint16_t extruder_id = mv->extruder_id() > 0 ? mv->extruder_id()-1 : 0;
+                            if (extruder_id == tool_id) {
+                                // found it.. now we just need to get the bounding box of this volume.
+                                b_box = instance.model_instance->get_object()->bounding_box();
+                                
+                                if (global_bounding_box.size().norm() == 0) {
+                                    global_bounding_box = b_box;
+                                } else {
+                                    global_bounding_box.merge(b_box);
+                                }
+                            }
+                        }
+                    }
+                }
+                min_height = global_bounding_box.min.z();
+                max_height = global_bounding_box.size().z();
+                // now create and add this to the mix_refs
+                ExtruderMixAndChangePts * m_and_cp =
+                new ExtruderMixAndChangePts(num_filaments, mix_ratios,change_points, gradient, absolute, min_height, max_height);
+                Mixer *mix = new Mixer;
+                mix->mix_points = m_and_cp;
+                mix->last_mix_values = m_and_cp->get_layer_mix_ratio(min_height);
+                m_mix_map.insert({tool_id, mix});
+                // output the initial mix for this tool.
+                gcode << gcodegen.writer().set_tool_mix(tool_id,
+                                                        m_and_cp->get_layer_mix_ratio(min_height));
+            }
+        }
+    }
+    return gcode.str();
+}
+
+
+
 // set standby temp for extruders
 // Parse the custom G-code, try to find T, and add it if not present
+
 void GCode::_init_multiextruders(Print& print, GCodeOutputStream& file, GCodeWriter & writer,  ToolOrdering &tool_ordering, const std::string &custom_gcode )
 {
 
-    //set standby temp for reprap
-    if (std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) {
+    //set tools and  temp for reprap
+    bool isMarlin = (std::set<uint8_t>{gcfMarlinFirmware}.count(print.config().gcode_flavor.value) > 0) ||
+    (std::set<uint8_t>{gcfMarlinFirmware}.count(print.config().gcode_flavor.value) > 0);
+    bool isRepRap = std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0;
+    
+    if (isRepRap) {
         for (uint16_t tool_id : tool_ordering.all_extruders()) {
             int standby_temp = int(print.config().temperature.get_at(tool_id));
             if (standby_temp > 0) {
@@ -1255,6 +1628,7 @@ void GCode::_init_multiextruders(Print& print, GCodeOutputStream& file, GCodeWri
                     standby_temp);
             }
         }
+        file.write_format("\n"); // just to be clean
     }
 }
 
@@ -1658,6 +2032,11 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
     if((initial_extruder_id != (uint16_t)-1) && !this->config().start_gcode_manual && this->config().gcode_flavor != gcfKlipper && print.config().first_layer_bed_temperature.get_at(initial_extruder_id) != 0)
         this->_print_first_layer_bed_temperature(file, print, start_all_gcode, initial_extruder_id, false);
 
+    // init (virtual) mixing extruders.  Also sets initial mix ratios for all mixing extruders.
+    //need to do this before setting temps or extruding.
+    // returns gcode for virtual tool creation and initial configuration
+    file.write(this->m_mixer_layers.init_mixing_extruders(*this, print, tool_ordering));
+
     //init extruders
     if (!this->config().start_gcode_manual)
         this->_init_multiextruders(print, file, m_writer, tool_ordering, start_gcode);
@@ -1666,6 +2045,7 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
     if ((initial_extruder_id != (uint16_t)-1) && !this->config().start_gcode_manual && (this->config().gcode_flavor != gcfKlipper || print.config().start_gcode.value.empty()) && print.config().first_layer_temperature.get_at(initial_extruder_id) != 0)
         this->_print_first_layer_extruder_temperatures(file, print, start_all_gcode, initial_extruder_id, false);
 
+   
     // adds tag for processor
     file.write_format(";%s%s\n", GCodeProcessor::reserved_tag(GCodeProcessor::ETags::Role).c_str(), ExtrusionEntity::role_to_string(erCustom).c_str());
 
@@ -1739,6 +2119,7 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
                 } else {
                     m_writer.toolchange(initial_extruder_id);
                 }
+
             } else {
                 // set writer to the tool as should be set in the start_gcode.
                 file.write(this->set_extruder(initial_extruder_id, 0., true));
@@ -1922,6 +2303,15 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
                 }
             }
         }
+        // **mtr** add code to release managed tools.
+        if (std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) {
+            for (uint16_t tool_id : tool_ordering.all_extruders()) {
+                if (bool(print.config().manage_tool_lifecycle.get_at(tool_id))) {
+                    file.write( m_writer.release_virtual_tool(tool_id));
+                }
+            }
+        }
+
         file.writeln(this->placeholder_parser_process("end_gcode", print.config().end_gcode, m_writer.tool()->id(), &config));
     }
     file.write(m_writer.update_progress(m_layer_count, m_layer_count, true)); // 100%
@@ -2053,14 +2443,14 @@ void GCode::process_layers(
 
     // The pipeline elements are joined using const references, thus no copying is performed.
     output_stream.find_replace_supress();
-    if (m_spiral_vase && m_find_replace)
-        tbb::parallel_pipeline(12, generator & spiral_vase & cooling & fan_mover & find_replace & output);
-    else if (m_spiral_vase)
-        tbb::parallel_pipeline(12, generator &  spiral_vase & cooling & fan_mover & output);
-    else if (m_find_replace)
-        tbb::parallel_pipeline(12, generator & cooling & fan_mover & find_replace & output);
-    else
-        tbb::parallel_pipeline(12, generator & cooling & fan_mover & output);
+    tbb::filter<void, GCode::LayerResult> pipeline_to_layerresult = generator;
+    if (m_spiral_vase)
+        pipeline_to_layerresult = pipeline_to_layerresult & spiral_vase;
+    tbb::filter<void, std::string> pipeline_to_string = pipeline_to_layerresult & cooling & fan_mover;
+    if (m_find_replace)
+        pipeline_to_string = pipeline_to_string & find_replace;
+    tbb::filter<void, void> full_pipeline = pipeline_to_string & output;
+    tbb::parallel_pipeline(12, full_pipeline);
     output_stream.find_replace_enable();
 }
 
@@ -2090,9 +2480,9 @@ void GCode::process_layers(
         });
     const auto spiral_vase = tbb::make_filter<GCode::LayerResult, GCode::LayerResult>(slic3r_tbb_filtermode::serial_in_order,
         [&spiral_vase = *this->m_spiral_vase.get()](GCode::LayerResult in)->GCode::LayerResult {
-            spiral_vase.enable(in.spiral_vase_enable);
-            return { spiral_vase.process_layer(std::move(in.gcode)), in.layer_id, in.spiral_vase_enable, in.cooling_buffer_flush };
-        });
+        spiral_vase.enable(in.spiral_vase_enable);
+        return { spiral_vase.process_layer(std::move(in.gcode)), in.layer_id, in.spiral_vase_enable, in.cooling_buffer_flush };
+    });
     const auto cooling = tbb::make_filter<GCode::LayerResult, std::string>(slic3r_tbb_filtermode::serial_in_order,
         [&cooling_buffer = *this->m_cooling_buffer.get()](GCode::LayerResult in)->std::string {
             return cooling_buffer.process_layer(std::move(in.gcode), in.layer_id, in.cooling_buffer_flush);
@@ -2127,14 +2517,14 @@ void GCode::process_layers(
 
     // The pipeline elements are joined using const references, thus no copying is performed.
     output_stream.find_replace_supress();
-    if (m_spiral_vase && m_find_replace)
-        tbb::parallel_pipeline(12, generator & spiral_vase & cooling & fan_mover & find_replace & output);
-    else if (m_spiral_vase)
-        tbb::parallel_pipeline(12, generator & spiral_vase & cooling & fan_mover & output);
-    else if (m_find_replace)
-        tbb::parallel_pipeline(12, generator & cooling & fan_mover & find_replace & output);
-    else
-        tbb::parallel_pipeline(12, generator & cooling & fan_mover & output);
+    tbb::filter<void, GCode::LayerResult> pipeline_to_layerresult = generator;
+    if (m_spiral_vase)
+        pipeline_to_layerresult = pipeline_to_layerresult & spiral_vase;
+    tbb::filter<void, std::string> pipeline_to_string = pipeline_to_layerresult & cooling & fan_mover;
+    if (m_find_replace)
+        pipeline_to_string = pipeline_to_string & find_replace;
+    tbb::filter<void, void> full_pipeline = pipeline_to_string & output;
+    tbb::parallel_pipeline(12, full_pipeline);
     output_stream.find_replace_enable();
 }
 
@@ -2182,66 +2572,161 @@ std::string GCode::placeholder_parser_process(const std::string &name, const std
 }
 
 // Parse the custom G-code, try to find mcode_set_temp_dont_wait and mcode_set_temp_and_wait or optionally G10 with temperature inside the custom G-code.
-// Returns true if one of the temp commands are found, and try to parse the target temperature value into temp_out.
-static bool custom_gcode_sets_temperature(const std::string &gcode, const int mcode_set_temp_dont_wait, const int mcode_set_temp_and_wait, const bool include_g10, int &temp_out)
+// Returns true if one of the temp commands are found, and associated with the tool_id. and try to parse the target temperature value into temp_out.
+// mtr modified to add tool_id check.
+static bool custom_gcode_sets_temperature(const std::string &gcode, const int mcode_set_temp_dont_wait, const int mcode_set_temp_and_wait, const bool include_g10, int &temp_out, int tool_id)
 {
     temp_out = -1;
     if (gcode.empty())
         return false;
+    
+    const char *ptr = gcode.data();
+    bool temp_set_by_gcode = false;
+    bool found_tool = false;
+    bool found_temp_and_tool = false;
+    int  last_tool = -1;
+    while (*ptr != 0) {
+        // Skip whitespaces.
+        for (; *ptr == ' ' || *ptr == '\t'; ++ ptr);
+        if (*ptr == 'T') {
+            //check for the tool
+            char *endptr = nullptr;
+            int toolnum = int(strtol(++ptr, &endptr, 10));
+            if (toolnum == tool_id && temp_set_by_gcode) {
+                found_tool = true;
+            }
+            last_tool = toolnum;
+            ptr = endptr;
+        } else if (*ptr == 'M' || // Line starts with 'M'. It is a machine command.
+                   (*ptr == 'G' && include_g10)) { // Only check for G10 if requested
+            bool is_gcode = *ptr == 'G';
+            char *endptr = nullptr;
+            int mgcode = int(strtol(++ptr, &endptr, 10));
+            is_gcode = is_gcode && mgcode == 10;
+            ptr = endptr;
+            if (is_gcode) {
+                // see if there's a tool defined here and if it matches.
+                // skip the white space
+                for (; *ptr == ' ' || *ptr == '\t'; ++ ptr);
+                if (*ptr == 'P') {
+                    // found a tool associated with it.
+                    char *endptr = nullptr;
+                    int mg10tool = int(strtol(++ptr, &endptr, 10));
+                    ptr = endptr;
+                    if (mg10tool == tool_id) {
+                        found_tool = true;
+                    }
+                    // skip whitespace
+                    for (; *ptr == ' ' || *ptr == '\t'; ++ ptr);
+                }
+                if (*ptr == 'S') {
+                    // found a G10 temp
+                    // skip the white sapce baby
+                    // Parse an int.
+                    endptr = nullptr;
+                    long temp_parsed = strtol(++ptr, &endptr, 10);
+                    ptr = endptr;
+                    if (endptr > ptr) {
+                        temp_out = temp_parsed;
+                        found_temp_and_tool = true;
+                    }
+                }
+            } else {
+                // must be an M command
+                // M104/M109 or M140/M190 found.
+                bool is_mcode = mgcode == mcode_set_temp_dont_wait || mgcode == mcode_set_temp_and_wait;
+                if (is_mcode) {
+                    // so, it's a valid M code. look for tool and temp settings.
+                    
+                    // Now try to parse the temperature value.
+                    // While not at the end of the line:
+                    // skip the white stuff
+                    for (; *ptr == ' ' || *ptr == '\t'; ++ ptr);
+                    if (*ptr == 'S') {
+                        // found a temperature setting
+                        // more of that white stuff
+                        // Parse an int.
+                        endptr = nullptr;
+                        long temp_parsed = strtol(++ptr, &endptr, 10);
+                        if (endptr > ptr) {
+                            ptr = endptr;
+                            temp_out = temp_parsed;
+                            temp_set_by_gcode = true;
+                        }
+                    } else {
+                        if (*ptr == 'T') {
+                            // found a tool.. see if it matches.
+                            // and yet more white stuff
+                            endptr = nullptr;
+                            int mtool =strtol(++ptr, &endptr, 10);
+                            if (endptr > ptr) {
+                                ptr = endptr;
+                                if (mtool == tool_id) {
+                                    found_tool = true;
+                                    found_temp_and_tool = true;
+                                }
+                            }
+                            
+                        }
+                    }
+                }
+            }
+        }else {
+            // Skip this word.
+            for (; strchr(" \t;\r\n\0", *ptr) == nullptr; ++ ptr);
+        }
+        // Skip the rest of the line.
+        for (; *ptr != 0 && *ptr != '\r' && *ptr != '\n'; ++ ptr);
+        // Skip the end of line indicators.
+        for (; *ptr == '\r' || *ptr == '\n'; ++ ptr);
+    }
+    return found_temp_and_tool && (last_tool == tool_id);
+}
 
+// simpler version for checking if the code sets the bed temperature
+static bool custom_gcode_sets_bed_temperature(const std::string &gcode, const int mcode_set_temp_dont_wait, const int mcode_set_temp_and_wait, int &temp_out)
+{
+    temp_out = -1;
+    if (gcode.empty())
+        return false;
+    
     const char *ptr = gcode.data();
     bool temp_set_by_gcode = false;
     while (*ptr != 0) {
         // Skip whitespaces.
         for (; *ptr == ' ' || *ptr == '\t'; ++ ptr);
-        if (*ptr == 'M' || // Line starts with 'M'. It is a machine command.
-            (*ptr == 'G' && include_g10)) { // Only check for G10 if requested
-            bool is_gcode = *ptr == 'G';
-            ++ ptr;
-            // Parse the M or G code value.
+        if (*ptr == 'M') {
             char *endptr = nullptr;
-            int mgcode = int(strtol(ptr, &endptr, 10));
-            if (endptr != nullptr && endptr != ptr && 
-                (is_gcode ?
-                    // G10 found
-                    (mgcode == 10) :
-                // M104/M109 or M140/M190 found.
-                    (mgcode == mcode_set_temp_dont_wait || mgcode == mcode_set_temp_and_wait))) {
-				ptr = endptr;
-                if (! is_gcode)
-                    // Let the caller know that the custom M-code sets the temperature.
-                temp_set_by_gcode = true;
+            int mgcode = int(strtol(++ptr, &endptr, 10));
+            ptr = endptr;
+            // M104/M109 or M140/M190 found.
+            bool is_mcode = mgcode == mcode_set_temp_dont_wait || mgcode == mcode_set_temp_and_wait;
+            if (is_mcode) {
+                // so, it's a valid M code. look for tool and temp settings.
+                
                 // Now try to parse the temperature value.
-				// While not at the end of the line:
-				while (strchr(";\r\n\0", *ptr) == nullptr) {
-                    // Skip whitespaces.
-                    for (; *ptr == ' ' || *ptr == '\t'; ++ ptr);
-                    if (*ptr == 'S') {
-                        // Skip whitespaces.
-                        for (++ ptr; *ptr == ' ' || *ptr == '\t'; ++ ptr);
-                        // Parse an int.
-                        endptr = nullptr;
-                        long temp_parsed = strtol(ptr, &endptr, 10);
-						if (endptr > ptr) {
-							ptr = endptr;
-							temp_out = temp_parsed;
-                            // Let the caller know that the custom G-code sets the temperature
-                            // Only do this after successfully parsing temperature since G10
-                            // can be used for other reasons
-                            temp_set_by_gcode = true;
-						}
-                    } else {
-                        // Skip this word.
-						for (; strchr(" \t;\r\n\0", *ptr) == nullptr; ++ ptr);
+                // While not at the end of the line:
+                // skip the white stuff
+                for (; *ptr == ' ' || *ptr == '\t'; ++ ptr);
+                if (*ptr == 'S') {
+                    // found a temperature setting
+                    // more of that white stuff
+                    // Parse an int.
+                    endptr = nullptr;
+                    long temp_parsed = strtol(++ptr, &endptr, 10);
+                    if (endptr > ptr) {
+                        ptr = endptr;
+                        temp_out = temp_parsed;
+                        temp_set_by_gcode = true;
                     }
                 }
             }
         }
         // Skip the rest of the line.
         for (; *ptr != 0 && *ptr != '\r' && *ptr != '\n'; ++ ptr);
-		// Skip the end of line indicators.
+        // Skip the end of line indicators.
         for (; *ptr == '\r' || *ptr == '\n'; ++ ptr);
-	}
+    }
     return temp_set_by_gcode;
 }
 
@@ -2333,7 +2818,7 @@ void GCode::_print_first_layer_bed_temperature(GCodeOutputStream &file, Print &p
     if (temp == 0) return;
     // Is the bed temperature set by the provided custom G-code?
     int  temp_by_gcode     = -1;
-    bool temp_set_by_gcode = custom_gcode_sets_temperature(gcode, 140, 190, false, temp_by_gcode);
+    bool temp_set_by_gcode = custom_gcode_sets_bed_temperature(gcode, 140, 190, temp_by_gcode);
     if (temp_set_by_gcode && temp_by_gcode >= 0 && temp_by_gcode < 1000)
         temp = temp_by_gcode;
     // Always call m_writer.set_bed_temperature() so it will set the internal "current" state of the bed temp as if
@@ -2350,10 +2835,13 @@ void GCode::_print_first_layer_bed_temperature(GCodeOutputStream &file, Print &p
 // RepRapFirmware: G10 Sxx
 void GCode::_print_first_layer_extruder_temperatures(GCodeOutputStream &file, Print &print, const std::string &gcode, uint16_t first_printing_extruder_id, bool wait)
 {
-    // Is the bed temperature set by the provided custom G-code?
     int  temp_by_gcode     = -1;
     bool include_g10   = print.config().gcode_flavor.value == gcfRepRap;
-    if (custom_gcode_sets_temperature(gcode, 104, 109, include_g10, temp_by_gcode)) {
+    bool managed = print.config().manage_tool_lifecycle.get_at(first_printing_extruder_id);
+    
+    // Is the extruder temperature set by the provided custom G-code?
+
+    if (custom_gcode_sets_temperature(gcode, 104, 109, include_g10, temp_by_gcode, first_printing_extruder_id)) {
         // Set the extruder temperature at m_writer, but throw away the generated G-code as it will be written with the custom G-code.
         int temp = print.config().first_layer_temperature.get_at(first_printing_extruder_id);
         if (temp == 0)
@@ -2373,7 +2861,7 @@ void GCode::_print_first_layer_extruder_temperatures(GCodeOutputStream &file, Pr
                 if (print.config().ooze_prevention.value)
                     temp += print.config().standby_temperature_delta.value;
                 if (temp > 0)
-                    file.write(m_writer.set_temperature(temp, false, tool.id()));
+                    file.write(m_writer.set_temperature(temp, wait, tool.id()));
             }
         }
         if (wait || print.config().single_extruder_multi_material.value) {
@@ -2735,7 +3223,7 @@ GCode::LayerResult GCode::process_layer(
             print.config().before_layer_gcode.value, m_writer.tool()->id(), &config)
             + "\n";
     }
-    // print z move to next layer UNLESS
+    // print z move to next layer UNLESS (HACK for superslicer#1775)
     // if it's going to the first layer, then we may want to delay the move in these condition:
     // there is no "after layer change gcode" and it's the first move from the unknown
     if (print.config().layer_gcode.value.empty() && !m_last_pos_defined && m_config.start_gcode_manual && (
@@ -2744,6 +3232,9 @@ GCode::LayerResult GCode::process_layer(
         ||   // or lift_min is higher than the first layer height.
          m_config.lift_min.value > layer.print_z
             )) {
+        // still do the retraction
+        gcode += m_writer.retract();
+        gcode += m_writer.reset_e();
         m_delayed_layer_change = this->change_layer(print_z); //HACK for superslicer#1775
     } else {
         //extra lift on layer change if multiple objects
@@ -2763,6 +3254,36 @@ GCode::LayerResult GCode::process_layer(
             + "\n";
         config.set_key_value("max_layer_z", new ConfigOptionFloat(m_max_layer_z));
     }
+    // check and update the mix ratios.
+    ToolOrdering tool_ordering = print.tool_ordering();
+    for (uint16_t tool_id : tool_ordering.all_extruders()) {
+        if (m_config.single_extruder_mixer.get_at(tool_id)) {
+            bool needs_change;
+            std::vector<double> mix = m_mixer_layers.layer_mix_change(tool_id, print_z, needs_change);
+            if (needs_change || first_layer) {
+                gcode += writer().set_tool_mix(tool_id, mix);
+            }
+        }
+    }
+    
+    if (first_layer) {
+        if (std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) {
+            // set the temps for all the mixing extruders.
+            for (const Extruder &extruder : m_writer.extruders()) {
+                if (print.config().single_extruder_multi_material.value) {
+                    if (print.config().single_extruder_mixer.get_at(extruder.id())) {
+                        // set the temp for all mixing extruders so things don't lock up
+                        // also, need to force a wait if the extruder id is the same as the writer id.
+                        int temperature = print.config().first_layer_temperature.get_at(extruder.id());
+                        bool do_wait = extruder.id() == m_writer.tool()->id();
+                        if(temperature > 0) // don't set it if disabled
+                            gcode += m_writer.set_temperature(temperature, do_wait, extruder.id());
+                    }
+                }
+            }
+        }
+
+    }
 
     //put G92 E0 is relative extrusion
     bool before_layer_gcode_resets_extruder = boost::regex_search(print.config().before_layer_gcode.value, regex_g92e0_gcode);
@@ -2779,18 +3300,25 @@ GCode::LayerResult GCode::process_layer(
     }
 
     if (! first_layer && ! m_second_layer_things_done) {
-        // Transition from 1st to 2nd layer. Adjust nozzle temperatures as prescribed by the nozzle dependent
-        // first_layer_temperature vs. temperature settings.
-        for (const Extruder &extruder : m_writer.extruders()) {
-            if (print.config().single_extruder_multi_material.value && extruder.id() != m_writer.tool()->id())
-                // In single extruder multi material mode, set the temperature for the current extruder only.
-                continue;
-            int temperature = print.config().temperature.get_at(extruder.id());
-            if(temperature > 0) // don't set it if disabled
-                gcode += m_writer.set_temperature(temperature, false, extruder.id());
-        }
+        // Transition from 1st to 2nd layer. Adjust bed and nozzle temperatures as prescribed by the nozzle dependent
         if(print.config().bed_temperature.get_at(first_extruder_id) > 0)  // don't set it if disabled
             gcode += m_writer.set_bed_temperature(print.config().bed_temperature.get_at(first_extruder_id));
+        
+        // first_layer_temperature vs. temperature settings.
+        if (std::set<uint8_t>{gcfRepRap}.count(print.config().gcode_flavor.value) > 0) {
+            for (const Extruder &extruder : m_writer.extruders()) {
+                if (print.config().single_extruder_multi_material.value) {
+                    if (extruder.id() == m_writer.tool()->id() || print.config().single_extruder_mixer.get_at(extruder.id())) {
+                        // In single extruder multi material mode, set the temperature for the current extruder only.. unless we have mixer...
+                        // also, need to force a wait if the extruder id is the same as the writer id.
+                        int temperature = print.config().temperature.get_at(extruder.id());
+                        bool do_wait = extruder.id() == m_writer.tool()->id();
+                        if(temperature > 0) // don't set it if disabled
+                            gcode += m_writer.set_temperature(temperature, do_wait, extruder.id());
+                    }
+                }
+            }
+        }
         // Mark the temperature transition from 1st to 2nd layer to be finished.
         m_second_layer_things_done = true;
     }
@@ -2976,7 +3504,6 @@ GCode::LayerResult GCode::process_layer(
         gcode += (layer_tools.has_wipe_tower && m_wipe_tower) ?
             m_wipe_tower->tool_change(*this, extruder_id, extruder_id == layer_tools.extruders.back()) :
             this->set_extruder(extruder_id, print_z);
-
         // let analyzer tag generator aware of a role type change
         if (layer_tools.has_wipe_tower && m_wipe_tower)
             m_last_processor_extrusion_role = erWipeTower;
@@ -3158,14 +3685,6 @@ GCode::LayerResult GCode::process_layer(
         }
     }
 
-#if 0
-    // Apply spiral vase post-processing if this layer contains suitable geometry
-    // (we must feed all the G-code into the post-processor, including the first
-    // bottom non-spiral layers otherwise it will mess with positions)
-    // we apply spiral vase at this stage because it requires a full layer.
-    // Just a reminder: A spiral vase mode is allowed for a single object per layer, single material print only.
-    if (m_spiral_vase)
-        gcode = m_spiral_vase->process_layer(std::move(gcode));
 
 
     //add milling post-process if enabled
@@ -3206,10 +3725,10 @@ GCode::LayerResult GCode::process_layer(
                 check_add_eol(gcode);
             }
 
-            gcode += "\n; began print:";
+            gcode += "\n; began milling:\n";
             for (const LayerToPrint& ltp : layers) {
                 if (ltp.object_layer != nullptr) {
-                    for (const PrintInstance& print_instance : ltp.object()->instances()){
+                    for (const PrintInstance& print_instance : ltp.object()->instances()) {
                         this->set_origin(unscale(print_instance.shift));
                         for (const LayerRegion* lr : ltp.object_layer->regions()) {
                             if (!lr->milling.empty()) {
@@ -3223,7 +3742,7 @@ GCode::LayerResult GCode::process_layer(
             }
 
             //switch to extruder
-            m_placeholder_parser.set("current_extruder", milling_extruder_id);
+            m_placeholder_parser.set("current_extruder", current_extruder_filament);
             // Append the filament start G-code.
             const std::string& end_mill_gcode = m_config.milling_toolchange_end_gcode.get_at(0);
             if (!end_mill_gcode.empty()) {
@@ -3246,6 +3765,14 @@ GCode::LayerResult GCode::process_layer(
         }
     }
 
+#if 0
+    // Apply spiral vase post-processing if this layer contains suitable geometry
+    // (we must feed all the G-code into the post-processor, including the first
+    // bottom non-spiral layers otherwise it will mess with positions)
+    // we apply spiral vase at this stage because it requires a full layer.
+    // Just a reminder: A spiral vase mode is allowed for a single object per layer, single material print only.
+    if (m_spiral_vase)
+        gcode = m_spiral_vase->process_layer(std::move(gcode));
 
     // Apply cooling logic; this may alter speeds.
     if (m_cooling_buffer)
@@ -3763,12 +4290,15 @@ std::string GCode::extrude_loop(const ExtrusionLoop &original_loop, const std::s
     std::cout << "\n";
 #endif
 
+    //useful var
+    const double nozzle_diam = (EXTRUDER_CONFIG_WITH_DEFAULT(nozzle_diameter, 0));
+
     //no-seam code path redirect
     if (original_loop.role() == ExtrusionRole::erExternalPerimeter && (original_loop.loop_role() & elrVase) != 0 && !this->m_config.spiral_vase
         //but not for the first layer
         && this->m_layer->id() > 0
         //exclude if min_layer_height * 2 > layer_height (increase from 2 to 3 because it's working but uses in-between)
-        && this->m_layer->height >= m_config.min_layer_height.get_abs_value(m_writer.tool()->id(), m_config.nozzle_diameter.get_at(m_writer.tool()->id())) * 2 - EPSILON
+        && this->m_layer->height >= m_config.min_layer_height.get_abs_value(m_writer.tool()->id(), nozzle_diam) * 2 - EPSILON
         ) {
         return extrude_loop_vase(original_loop, description, speed, lower_layer_edge_grid);
     }
@@ -3819,23 +4349,34 @@ std::string GCode::extrude_loop(const ExtrusionLoop &original_loop, const std::s
     // we discard it in that case
     ExtrusionPaths& building_paths = loop_to_seam.paths;
     if (m_enable_loop_clipping && m_writer.tool_is_extruder()) {
-        coordf_t clip_length = scale_(m_config.seam_gap.get_abs_value(m_writer.tool()->id(), EXTRUDER_CONFIG_WITH_DEFAULT(nozzle_diameter, 0)));
-        coordf_t min_clip_length = scale_(EXTRUDER_CONFIG_WITH_DEFAULT(nozzle_diameter, 0)) * 0.15;
+        coordf_t clip_length = scale_(m_config.seam_gap.get_abs_value(m_writer.tool()->id(), nozzle_diam));
+        coordf_t min_clip_length = scale_(nozzle_diam) * 0.15;
 
-        // get paths
-        ExtrusionPaths clipped;
-        if (clip_length > min_clip_length) {
-                // remove clip_length, like normally, but keep the removed part
-            clipped = clip_end(building_paths, clip_length);
-                // remove min_clip_length from the removed paths
-            clip_end(clipped, min_clip_length);
-                // ensure that the removed paths are travels
-            for (ExtrusionPath& ep : clipped)
-                ep.mm3_per_mm = 0;
-                // re-add removed paths as travels.
-            append(building_paths, clipped);
-        } else {
-            clip_end(building_paths, clip_length);
+        if (clip_length > full_loop_length / 4) {
+            //fall back to min_clip_length
+            if (clip_length > full_loop_length / 2) {
+                clip_length = min_clip_length;
+            } else {
+                float percent = (float(clip_length) / (float(full_loop_length) / 4)) - 1;
+                clip_length = clip_length * (1- percent) + min_clip_length * percent;
+            }
+        }
+        if (clip_length < full_loop_length / 4) {
+            // get paths
+            ExtrusionPaths clipped;
+            if (clip_length > min_clip_length) {
+                    // remove clip_length, like normally, but keep the removed part
+                clipped = clip_end(building_paths, clip_length);
+                    // remove min_clip_length from the removed paths
+                clip_end(clipped, min_clip_length);
+                    // ensure that the removed paths are travels
+                for (ExtrusionPath& ep : clipped)
+                    ep.mm3_per_mm = 0;
+                    // re-add removed paths as travels.
+                append(building_paths, clipped);
+            } else {
+                clip_end(building_paths, clip_length);
+            }
         }
     }
     if (building_paths.empty()) return "";
@@ -3843,8 +4384,8 @@ std::string GCode::extrude_loop(const ExtrusionLoop &original_loop, const std::s
 
     // apply the small perimeter speed
     if (speed == -1 && is_perimeter(paths.front().role()) && paths.front().role() != erThinWall) {
-        double min_length = scale_d(this->m_config.small_perimeter_min_length.get_abs_value(EXTRUDER_CONFIG_WITH_DEFAULT(nozzle_diameter, 0)));
-        double max_length = scale_d(this->m_config.small_perimeter_max_length.get_abs_value(EXTRUDER_CONFIG_WITH_DEFAULT(nozzle_diameter, 0)));
+        double min_length = scale_d(this->m_config.small_perimeter_min_length.get_abs_value(nozzle_diam));
+        double max_length = scale_d(this->m_config.small_perimeter_max_length.get_abs_value(nozzle_diam));
         if (full_loop_length < max_length) {
             if (full_loop_length <= min_length) {
                 speed = SMALL_PERIMETER_SPEED_RATIO_OFFSET;
@@ -3888,7 +4429,6 @@ std::string GCode::extrude_loop(const ExtrusionLoop &original_loop, const std::s
         Vec2d  next_pos = next_point.cast<double>();
         Vec2d  vec_dist = next_pos - current_pos;
         double vec_norm = vec_dist.norm();
-        const double nozzle_diam = (EXTRUDER_CONFIG_WITH_DEFAULT(nozzle_diameter, 0));
         const double setting_max_depth = (m_config.wipe_inside_depth.get_abs_value(m_writer.tool()->id(), nozzle_diam));
         coordf_t dist = scale_d(nozzle_diam) / 2;
         Point  pt = (current_pos + vec_dist * (2 * dist / vec_norm)).cast<coord_t>();
@@ -3932,6 +4472,16 @@ std::string GCode::extrude_loop(const ExtrusionLoop &original_loop, const std::s
     //wipe for External Perimeter (and not vase)
     if (paths.back().role() == erExternalPerimeter && m_layer != NULL && m_config.perimeters.value > 0 && paths.front().size() >= 2 && paths.back().polyline.points.size() >= 2
         && (m_enable_loop_clipping && m_writer.tool_is_extruder()) ) {
+        double dist_wipe_extra_perimeter = EXTRUDER_CONFIG_WITH_DEFAULT(wipe_extra_perimeter, 0);
+
+        //safeguard : if not possible to wipe, abord.
+        if (paths.size() == 1 && paths.front().size() <= 2) {
+            return gcode;
+        }
+        //TODO: abord if the wipe is too big for a mini loop (in a better way)
+        if (paths.size() == 1 && unscaled(paths.front().length()) < EXTRUDER_CONFIG_WITH_DEFAULT(wipe_extra_perimeter, 0) + nozzle_diam) {
+            return gcode;
+        }
         //get points for wipe
         Point prev_point = *(paths.back().polyline.points.end() - 2);       // second to last point
         // *(paths.back().polyline.points.end() - 2) this is the same as (or should be) as paths.front().first_point();
@@ -3945,8 +4495,8 @@ std::string GCode::extrude_loop(const ExtrusionLoop &original_loop, const std::s
 
         gcode += ";" + GCodeProcessor::reserved_tag(GCodeProcessor::ETags::Wipe_Start) + "\n";
         //extra wipe before the little move.
-        if (EXTRUDER_CONFIG_WITH_DEFAULT(wipe_extra_perimeter, 0) > 0) {
-            coordf_t wipe_dist = scale_(EXTRUDER_CONFIG_WITH_DEFAULT(wipe_extra_perimeter,0));
+        if (dist_wipe_extra_perimeter > 0) {
+            coordf_t wipe_dist = scale_(dist_wipe_extra_perimeter);
             ExtrusionPaths paths_wipe;
             m_wipe.reset_path();
             for (int i = 0; i < paths.size(); i++) {
@@ -4015,7 +4565,6 @@ std::string GCode::extrude_loop(const ExtrusionLoop &original_loop, const std::s
         Vec2d  next_pos = next_point.cast<double>();
         Vec2d  vec_dist = next_pos - current_pos;
         double vec_norm = vec_dist.norm();
-        const double nozzle_diam = (EXTRUDER_CONFIG_WITH_DEFAULT(nozzle_diameter, 0));
         const double setting_max_depth = (m_config.wipe_inside_depth.get_abs_value(m_writer.tool()->id(), nozzle_diam));
         coordf_t dist = scale_d(nozzle_diam) / 2;
         if (nozzle_diam != 0 && setting_max_depth > nozzle_diam * 0.55)
@@ -5427,7 +5976,7 @@ std::string GCode::set_extruder(uint16_t extruder_id, double print_z, bool no_to
         return "";
 
     // if we are running a single-extruder setup, just set the extruder and return nothing
-    if (!m_writer.multiple_extruders) {
+    if (!m_writer.multiple_extruders ) {
         m_placeholder_parser.set("current_extruder", extruder_id);
 
         std::string gcode;
@@ -5488,7 +6037,8 @@ std::string GCode::set_extruder(uint16_t extruder_id, double print_z, bool no_to
         int temp = (m_layer_index <= 0 && m_config.first_layer_temperature.get_at(extruder_id) > 0 ? m_config.first_layer_temperature.get_at(extruder_id) :
                                          m_config.temperature.get_at(extruder_id));
         if (temp > 0)
-            gcode += m_writer.set_temperature(temp, false);
+            gcode += m_writer.set_temperature(temp, false, extruder_id);
+        
     }
 
     m_placeholder_parser.set("current_extruder", extruder_id);
@@ -5506,7 +6056,7 @@ std::string GCode::set_extruder(uint16_t extruder_id, double print_z, bool no_to
         check_add_eol(gcode);
         //check if it changed the temp
         int  temp_by_gcode = -1;
-        if (custom_gcode_sets_temperature(gcode, 104, 109, false, temp_by_gcode)) {
+        if (custom_gcode_sets_temperature(gcode, 104, 109, false, temp_by_gcode, extruder_id)) {
             //set writer
             m_writer.set_temperature(temp_by_gcode, false, extruder_id);
         }

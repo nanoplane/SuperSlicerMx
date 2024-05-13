@@ -86,8 +86,9 @@ public:
         return (*this);
     }
 
+    // **mtr doesn't work for reprap where you create virtual tools.
     WipeTowerWriter&            disable_linear_advance() {
-        if (m_gcode_flavor == gcfRepRap || m_gcode_flavor == gcfSprinter) {
+        if (/*m_gcode_flavor == gcfRepRap ||*/ m_gcode_flavor == gcfSprinter) {
             m_gcode += (std::string("M572 D") + std::to_string(this->m_current_tool) + " S0\n");
         } else if (m_gcode_flavor == gcfKlipper) {
             if (this->m_current_tool > 0 && this->m_current_tool < m_tool_name.size() && !m_tool_name[this->m_current_tool].empty()
@@ -96,12 +97,10 @@ public:
                 && m_tool_name[this->m_current_tool][0] != static_cast<char>(('0' + this->m_current_tool))) {
                 m_gcode += "SET_PRESSURE_ADVANCE ADVANCE=0 EXTRUDER=" + m_tool_name[this->m_current_tool] + "\n";
             } else {
-                m_gcode += "SET_PRESSURE_ADVANCE ADVANCE=0 EXTRUDER=extruder";
-                if (this->m_current_tool > 0)
-                    m_gcode += std::to_string(this->m_current_tool);
-                m_gcode += "\n";
+                m_gcode += "SET_PRESSURE_ADVANCE ADVANCE=0\n";
             }
-        } else {
+        }
+        else {
             m_gcode += std::string("M900 K0\n");
         }
         return *this;
@@ -427,7 +426,7 @@ public:
                 gcode << " T" << tool;
             }
         }
-    
+
         if(!comment.empty())
             gcode << " ; " << comment << "\n";
 
@@ -563,6 +562,7 @@ private:
     GCodeFlavor   m_gcode_flavor;
     std::vector<std::string> m_tool_name;
     const std::vector<WipeTower::FilamentParameters>& m_filpar;
+    std::string   m_tool_mix_ratio;
 
 	std::string   set_format_X(float x)
     {
@@ -811,7 +811,7 @@ std::vector<WipeTower::ToolChangeResult> WipeTower::prime(
         toolchange_Load(writer, cleaning_box); // Prime the tool.
         if (idx_tool + 1 == tools.size()) {
             // Last tool should not be unloaded, but it should be wiped enough to become of a pure color.
-            toolchange_Wipe(writer, cleaning_box, wipe_volumes[tools[idx_tool-1]][tool]);
+            toolchange_Wipe(writer, cleaning_box, wipe_volumes[tools[idx_tool/*-1*/]][tool]);
         } else {
             // Ram the hot material out of the melt zone, retract the filament into the cooling tubes and let it cool.
             //writer.travel(writer.x(), writer.y() + m_perimeter_width, 7200);

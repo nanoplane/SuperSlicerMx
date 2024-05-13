@@ -1135,7 +1135,7 @@ void Sidebar::jump_to_option(size_t selected)
         }
     }
 
-    wxGetApp().get_tab(opt.type)->activate_option(opt.opt_key(), boost::nowide::narrow(opt.category));
+    wxGetApp().get_tab(opt.type)->activate_option(opt.opt_key_with_idx(), boost::nowide::narrow(opt.category));
 
     // Switch to the Settings NotePad
 //    wxGetApp().mainframe->select_tab(MainFrame::ETabType::LastSettings);
@@ -2042,12 +2042,18 @@ Plater::priv::priv(Plater *q, MainFrame *main_frame)
         "max_print_height",
         "perimeter_extrusion_width",
         "extrusion_width",
-        "skirts", "skirt_brim", "skirt_distance", "skirt_distance_from_brim", 
+        "skirts", "skirt_brim", "skirt_distance", "skirt_distance_from_brim",
         "skirt_extrusion_width", "skirt_height",
         "variable_layer_height", "nozzle_diameter", "single_extruder_multi_material",
         "wipe_tower", "wipe_tower_brim_width", "wipe_tower_rotation_angle", "wipe_tower_width", "wipe_tower_x", "wipe_tower_y",
         "extruder_colour", "filament_colour", "material_colour",
         "printer_model", "printer_technology",
+        "wipe_mix_backflow",
+        "wipe_mix_bubble",
+        "wipe_mix_bubble_volume",
+        "wipe_mix_two_stage",
+        "wipe_mix_backflow_volume",
+        "wipe_mix_bubble_layers",
         // These values are necessary to construct SlicingParameters by the Canvas3D variable layer height editor.
         "layer_height", "first_layer_height", "min_layer_height", "max_layer_height",
         "perimeters", "perimeter_extruder", "fill_density", "infill_extruder", "raft_layers", 

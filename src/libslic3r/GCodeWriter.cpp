@@ -145,17 +145,17 @@ std::string GCodeWriter::postamble() const
 
 std::string GCodeWriter::set_temperature(const int16_t temperature, bool wait, int tool)
 {
+    int m_tool_id = m_tool != nullptr ? m_tool->id() : -1;
     //use m_tool if tool isn't set
-    if (tool < 0 && m_tool != nullptr)
-        tool = m_tool->id();
+    if (tool < 0 && m_tool_id > 0)
+        tool = m_tool_id;
 
     //add offset
     int16_t temp_w_offset = temperature;
     temp_w_offset += int16_t(get_tool(tool)->temp_offset());
     temp_w_offset = std::max(int16_t(0), std::min(int16_t(2000), temp_w_offset));
 
-    // temp_w_offset has an effective minimum value of 0, so this cast is safe.
-    if (m_last_temperature_with_offset == temp_w_offset && !wait)
+    if (m_last_temperature_with_offset == temp_w_offset && !wait && tool == m_tool_id)
         return "";
     if (wait && (FLAVOR_IS(gcfMakerWare) || FLAVOR_IS(gcfSailfish)))
         return "";
@@ -388,6 +388,76 @@ std::string GCodeWriter::toolchange(uint16_t tool_id)
         gcode << "\n";
         gcode << this->reset_e(true);
     }
+    return gcode.str();
+}
+
+// for mixing extruders, create's a virtual tool
+std::string GCodeWriter::create_virtual_tool(int tool_id, std::string drives, std::string name)
+{
+    std::ostringstream gcode;
+    if (FLAVOR_IS(gcfRepRap))
+        gcode << "M563 P" << tool_id << " " << drives << " S\"" << name
+        << "\" ; create virtual tool\n";
+    else
+        gcode << "; create Marlin virtual tool - NOT!\n";
+    
+    return gcode.str();
+}
+
+// for mixing extruders, releaes a virtual tool
+std::string GCodeWriter::release_virtual_tool(int tool_id)
+{
+    std::ostringstream gcode;
+    if (FLAVOR_IS(gcfRepRap)) {
+        gcode << "M563 P" << tool_id << " D-1 H-1 ; Let the tool go\n";
+    }
+    
+    return gcode.str();
+}
+
+// for mixing extruders, sets the mixture ratio based on the vector of values.
+// limits decimals.
+std::string GCodeWriter::set_tool_mix(int tool_id, std::vector<double> ratios)
+{
+    std::ostringstream gcode;
+    if (FLAVOR_IS(gcfRepRap)) {
+        gcode << "M567 P" << tool_id << " E";
+        for (int i=0; i< ratios.size(); i++) {
+            gcode << (i>0 ? ":" : "") << XYZ_NUM(ratios[i]);
+        }
+    }
+    else if (FLAVOR_IS(gcfMarlinLegacy) || FLAVOR_IS(gcfMarlinFirmware) ||FLAVOR_IS(gcfKlipper)) {
+        if (tool_id == 0) {
+            // tool 0 is "special" since in a mixing scenario, it's the only one that's real
+            // so... we just set the mix directly. up to 6 components... at least I think this will work.
+            //M165 A0.2 B0.4 C0.3 D0.1 H0.0 I0.0
+            gcode << "M165 ";
+            std::string drivers = "ABCDHI";
+            int i=0;
+            for (double val : ratios) {
+                gcode << drivers[i++]  << int(val*100) << " ";
+            }
+        } else {
+            int i=0;
+            for (double val : ratios) {
+                gcode << "M163 S" << i++ << " P" << int(val*100) << "\n";
+            }
+            gcode << " M164 S" << tool_id;
+        }
+    }
+    gcode << " ; set mix ratio\n";
+    
+    return gcode.str();
+}
+
+// for managed tools, sets firmware retraction
+std::string GCodeWriter::set_tool_fimrware_retraction(int tool_id, double length, double speed, double lift)
+{
+    std::ostringstream gcode;
+    if (FLAVOR_IS(gcfRepRap))
+        gcode << "M207 P" << tool_id << " S" << XYZ_NUM(length) << " F" << speed
+        << "Z " << lift;
+    gcode << "; set firmware retraction \n";
     return gcode.str();
 }
 

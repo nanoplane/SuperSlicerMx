@@ -283,8 +283,10 @@ else ()
     endif ()
      add_custom_command(TARGET Slic3r POST_BUILD
         # COMMAND ln -sfn "${SLIC3R_RESOURCES_DIR}" "${BIN_RESOURCES_DIR}" # make[3]: stat: src/Slic3r: Too many levels of symbolic links
-		 COMMAND cp -r "${SLIC3R_RESOURCES_DIR}" "${BIN_RESOURCES_DIR}"
-         COMMENT "Symlinking the resources directory into the build tree"
+ 		 COMMAND rm -rf "${BIN_RESOURCES_DIR}"
+		 COMMAND cp -R "${SLIC3R_RESOURCES_DIR}\/" "${BIN_RESOURCES_DIR}"
+		 COMMAND cp -R "${SLIC3R_MY_RESOURCES_DIR}\/" "${BIN_RESOURCES_DIR}"
+         COMMENT "copying the resources directory into the build tree"
          VERBATIM)
 endif ()
 
